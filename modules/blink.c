@@ -1,6 +1,7 @@
 #include <libopencm3/stm32/gpio.h>
 #include <stdint.h>
 
+// __attribute__((section(".ccm_text"), noinline))
 void blink(int k)
 {
     gpio_set(GPIOC, GPIO6);

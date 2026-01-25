@@ -19,6 +19,7 @@ static void ccm_init(void)
 int main(void)
 {
     rcc_clock_setup_pll(&rcc_hsi_configs[RCC_CLOCK_3V3_170MHZ]);
+    ccm_init();
 
     /* Enable GPIOC clock */
     rcc_periph_clock_enable(RCC_GPIOC);

@@ -71,6 +71,7 @@ SECTIONS
 		_data = .;
 		*(.data*)	/* Read-write initialized data */
 		*(.ramtext*)    /* "text" functions to run in ram */
+        *(.code_in_ram)
 		. = ALIGN(4);
 		_edata = .;
 	} >ram AT >rom
