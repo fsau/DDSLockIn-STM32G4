@@ -1,19 +1,16 @@
 #include <libopencm3/stm32/gpio.h>
+#include <stdint.h>
 
-__attribute__ ((section (".code_in_ram")))
-void blink(void)
+void blink(int k)
 {
-    for (;;)
+    gpio_set(GPIOC, GPIO6);
+    for (int i = 0; i < k; i++)
     {
-        GPIOC_BRR = GPIO13;
-        for (int i = 0; i < 1e6; i++)
-        {
-            __asm__("nop");
-        }
-        GPIOC_BSRR = GPIO13;
-        for (int i = 0; i < 1e6; i++)
-        {
-            __asm__("nop");
-        }
+        __asm__("nop");
+    }
+    gpio_clear(GPIOC, GPIO6);
+    for (int i = 0; i < k; i++)
+    {
+        __asm__("nop");
     }
 }

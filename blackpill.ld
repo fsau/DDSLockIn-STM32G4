@@ -1,7 +1,8 @@
 MEMORY
 {
-    rom (rx) : ORIGIN = 0x08000000, LENGTH = 128K
-    ram (rwx) : ORIGIN = 0x20000000, LENGTH = 20K
+    rom (rx)  : ORIGIN = 0x08000000, LENGTH = 128K
+    ram (rwx) : ORIGIN = 0x20000000, LENGTH = 22K
+    ccm (rwx) : ORIGIN = 0x10000000, LENGTH = 10K
 }
 
 /* Enforce emmition of the vector table. */
@@ -14,7 +15,7 @@ ENTRY(reset_handler)
 SECTIONS
 {
 	.text : {
-		*(.vectors)	/* Vector table */
+		KEEP(*(.vectors)) /* Vector table */
 		*(.text*)	/* Program code */
 		. = ALIGN(4);
 		*(.rodata*)	/* Read-only data */
@@ -69,8 +70,7 @@ SECTIONS
 	.data : {
 		_data = .;
 		*(.data*)	/* Read-write initialized data */
-		*(.ramtext*)    /* "text" functions to run in ram */      
-        *(.code_in_ram)
+		*(.ramtext*)    /* "text" functions to run in ram */
 		. = ALIGN(4);
 		_edata = .;
 	} >ram AT >rom
@@ -83,6 +83,25 @@ SECTIONS
 		_ebss = .;
 	} >ram
 
+    .ccm_text :
+    {
+        . = ALIGN(4);
+        *(.ccm_text*)
+        . = ALIGN(4);
+    } > ccm AT > rom
+
+    _ccm_text_loadaddr = LOADADDR(.ccm_text);
+    _ccm_text_start    = ADDR(.ccm_text);
+    _ccm_text_end      = ADDR(.ccm_text) + SIZEOF(.ccm_text);
+
+    /* --- CCM data (no init image) --- */
+    .ccm_data (NOLOAD) :
+    {
+        . = ALIGN(4);
+        *(.ccm_data*)
+        . = ALIGN(4);
+    } > ccm
+
 	/*
 	 * The .eh_frame section appears to be used for C++ exception handling.
 	 * You may need to fix this if you're using C++.
@@ -94,4 +113,3 @@ SECTIONS
 }
 
 PROVIDE(_stack = ORIGIN(ram) + LENGTH(ram));
-

@@ -5,15 +5,15 @@ OBJDUMP = $(CROSS_COMPILE)objdump
 READELF = $(CROSS_COMPILE)readelf
 NM = $(CROSS_COMPILE)nm
 SIZE = $(CROSS_COMPILE)size
-CPUFLAGS = -mcpu=cortex-m3 -mthumb
-CFLAGS = -Wall -Wextra -g3 -Os -MD $(CPUFLAGS) -DSTM32F1 -I./libopencm3/include -Imodules
+CPUFLAGS = -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
+CFLAGS = -Wall -Wextra -g3 -Os -MD $(CPUFLAGS) -DSTM32G4 -I./libopencm3/include -Imodules
 LDFLAGS = $(CPUFLAGS) -nostartfiles -L./libopencm3/lib -Wl,-T,$(LDSCRIPT) -Wl,-Map,$(TARGET).map
-LDLIBS = -lopencm3_stm32f1 -lc -lnosys
+LDLIBS = -lopencm3_stm32g4 -lc -lnosys
 
 CSRC = $(wildcard modules/*.c) main.c 
 OBJ = $(patsubst %.c,build/%.o,$(CSRC))
 TARGET = build/main
-LDSCRIPT = bluepill.ld
+LDSCRIPT = blackpill.ld
 
 all: libopencm3 $(TARGET).bin $(TARGET).dis $(TARGET).sym $(TARGET).size $(TARGET).map $(TARGET).elf.txt
 
@@ -44,7 +44,7 @@ build/%.size: build/%.elf
 build/%.elf.txt: build/%.elf
 	$(READELF) -a $< > $@
 
-.PHONY: libopencm3 clean prog
+.PHONY: libopencm3 clean prog openocd
 
 libopencm3:
 	if [ ! -f libopencm3/Makefile ]; then \
@@ -59,3 +59,9 @@ clean:
 
 prog: $(TARGET).bin
 	st-flash write $< 0x08000000
+
+openocd:
+	openocd -f interface/stlink.cfg -f target/stm32f4x.cfg -c "gdb_memory_map disable" -c "gdb_flash_program disable"
+
+gdb: $(TARGET).elf
+	arm-none-eabi-gdb $(TARGET).elf 
