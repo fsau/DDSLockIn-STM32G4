@@ -1,0 +1,103 @@
+#include "uart.h"
+
+#include <libopencm3/stm32/rcc.h>
+#include <libopencm3/stm32/gpio.h>
+#include <libopencm3/stm32/usart.h>
+#include <libopencm3/stm32/dma.h>
+#include <libopencm3/stm32/f1/nvic.h>
+
+#define UART            USART1
+#define UART_RCC        RCC_USART1
+
+#define UART_GPIO       GPIOA
+#define UART_TX_PIN     GPIO9
+#define UART_RX_PIN     GPIO10
+
+#define UART_DMA        DMA1
+#define UART_DMA_CH_TX  DMA_CHANNEL4   /* USART1_TX */
+
+/* -------- init -------- */
+
+void uart_init(void)
+{
+    /* Clocks */
+    rcc_periph_clock_enable(UART_GPIO);
+    rcc_periph_clock_enable(UART_RCC);
+    rcc_periph_clock_enable(UART_DMA);
+    // rcc_periph_clock_enable(RCC_AFIO);
+
+    /* TX: PA9 AF push-pull */
+    gpio_set_mode(
+        UART_GPIO,
+        GPIO_MODE_OUTPUT_50_MHZ,
+        GPIO_CNF_OUTPUT_ALTFN_PUSHPULL,
+        UART_TX_PIN
+    );
+
+    /* RX: PA10 floating (unused but configured correctly) */
+    gpio_set_mode(
+        UART_GPIO,
+        GPIO_MODE_INPUT,
+        GPIO_CNF_INPUT_FLOAT,
+        UART_RX_PIN
+    );
+
+    /* USART setup */
+    usart_set_baudrate(UART, 115200);
+    usart_set_databits(UART, 8);
+    usart_set_stopbits(UART, USART_STOPBITS_1);
+    usart_set_mode(UART, USART_MODE_TX);
+    usart_set_parity(UART, USART_PARITY_NONE);
+    usart_set_flow_control(UART, USART_FLOWCONTROL_NONE);
+    usart_enable_tx_dma(UART);
+
+    usart_enable(UART);
+}
+
+bool uart_busy(void)
+{
+    return DMA1_CCR4 & DMA_CCR_EN;
+}
+
+bool uart_send(const void *data, size_t len)
+{
+    /* DMA channel reset */
+    dma_channel_reset(UART_DMA, UART_DMA_CH_TX);
+
+    dma_set_peripheral_address(
+        UART_DMA,
+        UART_DMA_CH_TX,
+        (uint32_t)&USART_DR(UART)
+    );
+
+    dma_set_memory_address(
+        DMA1, DMA_CHANNEL4, (uint32_t)data
+    );
+
+    dma_set_number_of_data(
+        DMA1, DMA_CHANNEL4, len
+    );
+
+    dma_set_read_from_memory(UART_DMA, UART_DMA_CH_TX);
+    dma_enable_memory_increment_mode(UART_DMA, UART_DMA_CH_TX);
+
+    dma_set_peripheral_size(UART_DMA, UART_DMA_CH_TX, DMA_CCR_PSIZE_8BIT);
+    dma_set_memory_size(UART_DMA, UART_DMA_CH_TX, DMA_CCR_MSIZE_8BIT);
+
+    dma_set_priority(UART_DMA, UART_DMA_CH_TX, DMA_CCR_PL_LOW);
+
+    dma_enable_transfer_complete_interrupt(UART_DMA, UART_DMA_CH_TX);
+
+    nvic_enable_irq(NVIC_DMA1_CHANNEL4_IRQ);
+
+    dma_enable_channel(DMA1, DMA_CHANNEL4);
+    return true;
+}
+
+void dma1_channel4_isr(void)
+{
+    if (dma_get_interrupt_flag(DMA1, DMA_CHANNEL4, DMA_TCIF)){
+        dma_clear_interrupt_flags(DMA1, DMA_CHANNEL4, DMA_TCIF);
+        adc_dma_done++;
+    }
+}

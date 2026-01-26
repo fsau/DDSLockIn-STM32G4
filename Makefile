@@ -61,7 +61,7 @@ prog: $(TARGET).bin
 	st-flash write $< 0x08000000
 
 openocd:
-	openocd -f interface/stlink.cfg -f target/stm32f4x.cfg -c "gdb_memory_map disable" -c "gdb_flash_program disable"
+	openocd -f interface/stlink.cfg -f target/stm32g4x.cfg -c "gdb_memory_map disable" -c "gdb_flash_program disable"
 
 gdb: $(TARGET).elf
 	arm-none-eabi-gdb $(TARGET).elf 

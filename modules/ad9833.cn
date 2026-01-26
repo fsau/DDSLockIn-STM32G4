@@ -1,0 +1,50 @@
+#include <libopencm3/stm32/gpio.h>
+#include <stdint.h>
+#include "spi.h"
+#include "ad9833.h"
+
+void ad9833_write16(uint16_t word)
+{
+    gpio_clear(FSYNC_PORT, FSYNC_PIN);
+
+    spi_tx8(word >> 8);
+    spi_tx8(word & 0xFF);
+
+    gpio_set(FSYNC_PORT, FSYNC_PIN);
+}
+
+void ad9833_init(void)
+{
+    /* FSYNC */
+    /* PC13 as push-pull output */
+    gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT,
+                    GPIO_PUPD_NONE, FSYNC_PIN);
+    gpio_set(FSYNC_PORT, FSYNC_PIN);
+
+    ad9833_write16(0x2100);   // RESET=1, B28=1
+}
+
+void ad9833_set_frequency(float freq)
+{
+    uint32_t ftw =
+        (uint64_t)freq * (1UL << 28) / DDS_MCLK;
+
+    uint16_t lsb = 0x4000 | (ftw & 0x3FFF);
+    uint16_t msb = 0x4000 | ((ftw >> 14) & 0x3FFF);
+
+    ad9833_write16(0x2000);
+
+    ad9833_write16(lsb);
+    ad9833_write16(msb);
+}
+
+void ad9833_set_freq_word(uint32_t ftw)
+{
+    uint16_t lsb = 0x4000 | (ftw & 0x3FFF);
+    uint16_t msb = 0x4000 | ((ftw >> 14) & 0x3FFF);
+
+    ad9833_write16(0x2000);
+
+    ad9833_write16(lsb);
+    ad9833_write16(msb);
+}
