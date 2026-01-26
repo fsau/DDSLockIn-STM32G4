@@ -65,3 +65,6 @@ openocd:
 
 gdb: $(TARGET).elf
 	arm-none-eabi-gdb $(TARGET).elf 
+
+dfu:  $(TARGET).bin
+	dfu-util -a 0 -s 0x08000000:leave -D $<

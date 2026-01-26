@@ -34,7 +34,7 @@ int main(void)
                             GPIO_OSPEED_2MHZ,
                             GPIO6);
     while(1){
-        blink(1600000);
+        blink(40000000);
     }
 
     return 0;
