@@ -1,14 +1,27 @@
-#ifndef ADC_H_FILE
-#define ADC_H_FILE
+#ifndef ADC_H
+#define ADC_H
 
-#define ADC_BUF_LEN 512
-#define ADC_BUF_BLEN ADC_BUF_LEN*2
-#define BUFF_N 512
+#include <stdint.h>
 
-void delay_ms(uint32_t ms);
-void adc_single_setup(void);
-uint16_t adc_read_ch0(void);
-void adc_dual_freerun_setup(void);
-void adc_sample_dual_freerun(uint16_t *buf1,uint16_t *buf2);
+#define ADC_BUF_LEN 1024
 
-#endif
+extern volatile uint32_t adc_buffer[ADC_BUF_LEN];
+extern volatile uint8_t adc_capture_complete;
+
+/* Initialize ADC1+ADC2 in dual simultaneous mode with DMA for 170MHz clock */
+void adc_dual_dma_init(void);
+
+/* Capture one buffer of ADC1 and ADC2 data (blocking) */
+void adc_capture_buffer(uint16_t *adc1_data, uint16_t *adc2_data);
+
+/* Start continuous mode (free-running) */
+void adc_start_continuous_mode(void);
+
+/* Stop continuous mode */
+void adc_stop_continuous_mode(void);
+
+void adc_capture_buffer_no_dma(uint16_t *adc1_data, uint16_t *adc2_data, uint32_t num_samples);
+
+void timer_adc_trigger_init(void);
+
+#endif /* ADC_H */

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <libopencm3/usb/usbd.h>
 
-extern uint32_t clock_ticks;
+extern volatile uint32_t clock_ticks;
 
 // Buffer size for USB serial
 #ifndef BUFF_SIZE
@@ -13,13 +13,6 @@ extern uint32_t clock_ticks;
 
 // Function pointer type for callback processing
 typedef uint8_t (*usbserial_process_cb_t)(uint8_t byte, void* context);
-
-// USB device handle
-extern usbd_device *usbd_dev;
-
-// USB interrupt handlers
-void usb_hp_isr(void);
-void usb_lp_isr(void);
 
 // Initialization
 void usbserial_init(void);
@@ -39,6 +32,6 @@ uint32_t usbserial_read_until(uint8_t* buffer, uint32_t max_len,
 int16_t usbserial_peek(void);
 void usbserial_flush_rx(void);
 uint32_t usbserial_process_rx(usbserial_process_cb_t process_callback, void* context);
-uint32_t usbserial_read_line(char* line_buffer, uint32_t max_len, uint8_t echo);
+// uint32_t usbserial_read_line(char* line_buffer, uint32_t max_len, uint8_t echo);
 
 #endif

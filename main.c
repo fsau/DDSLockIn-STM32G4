@@ -5,8 +5,9 @@
 #include <libopencm3/cm3/systick.h>
 #include <libopencm3/cm3/nvic.h>
 #include "usbserial.h"
+#include "adc.h"
 
-uint32_t clock_ticks = 0;
+volatile uint32_t clock_ticks = 0;
 
 // SysTick interrupt handler
 void sys_tick_handler(void)
@@ -34,14 +35,19 @@ void delay_ms(uint32_t ms)
         __asm__("nop");
 }
 
+__attribute__((noinline))
+void bp_here(void) {__asm__ volatile ("bkpt #0");;}
+
+
+uint16_t ch0[ADC_BUF_LEN], ch1[ADC_BUF_LEN];
+
 int main(void)
 {
+    // bp_here();
 	// usbd_device *usbd_dev;
     struct rcc_clock_scale pllconfig = rcc_hse_8mhz_3v3[RCC_CLOCK_3V3_170MHZ];
 	rcc_clock_setup_pll(&pllconfig);
     systick_setup(170000000); // 1kHz
-
-    usbserial_init();
 
     /* Enable GPIOC clock */
     rcc_periph_clock_enable(RCC_GPIOC);
@@ -56,22 +62,28 @@ int main(void)
                             GPIO_OSPEED_2MHZ,
                             GPIO6);
 
+    gpio_set(GPIOC, GPIO6);
+
+    usbserial_init();
+    adc_dual_dma_init();
+    usbserial_flush_rx();
+    timer_adc_trigger_init();
+
 	while (1) {
         static uint32_t lasttick = 0;
 
-        if((clock_ticks%1000) > 500){
-            gpio_set(GPIOC, GPIO6);
-        } else {
-            gpio_clear(GPIOC, GPIO6);
-        }
-
-        if((clock_ticks%1000)==0)
-        {
-            if(clock_ticks != lasttick){
-                lasttick = clock_ticks;
-                char teststr[64];
-                uint8_t s = usbserial_read_rx(teststr,64);
-                usbserial_send_tx(teststr,s);
+        if((clock_ticks/1000) != lasttick){
+            lasttick = clock_ticks/1000;
+            uint8_t teststr[64];
+            uint8_t s = usbserial_read_rx(teststr,64);
+            usbserial_send_tx(teststr,s);
+            gpio_toggle(GPIOC, GPIO6);
+            adc_capture_buffer(ch0,ch1);
+            // adc_capture_buffer_no_dma(ch0,ch1,10);
+            for(uint32_t i = 0; i < 10; i++){
+                char str[30];
+                uint32_t s = snprintf(str,20,"%u,%u;",ch0[i],ch1[i]);
+                usbserial_send_tx(str,s);
             }
         }
 	}

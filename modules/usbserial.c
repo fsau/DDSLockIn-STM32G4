@@ -353,6 +353,7 @@ void usbserial_send_tx(uint8_t* data, uint32_t len)
     // Trigger transmission
     cdcacm_data_tx_cb(usbd_dev, 0);
 }
+
 /**
  * @brief Read data from the USB receive buffer
  * @param data Pointer to buffer where data will be copied
@@ -529,73 +530,63 @@ uint32_t usbserial_process_rx(usbserial_process_cb_t process_callback, void* con
     return bytes_processed;
 }
 
-// Define callback type for usbserial_process_rx
-typedef uint8_t (*usbserial_process_cb_t)(uint8_t byte, void* context);
-
-/**
- * @brief Non-blocking line read with echo
- * @param line_buffer Buffer to store line
- * @param max_len Maximum line length
- * @param echo 1 to echo characters back, 0 for silent
- * @return Length of line read (0 if no complete line yet)
- */
-uint32_t usbserial_read_line(char* line_buffer, uint32_t max_len, uint8_t echo)
-{
-    static char line[256];
-    static uint32_t line_index = 0;
+// uint32_t usbserial_read_line(char* line_buffer, uint32_t max_len, uint8_t echo)
+// {
+//     static char line[256];
+//     static uint32_t line_index = 0;
     
-    uint8_t ch;
+//     uint8_t ch;
     
-    while (usbserial_read_byte(&ch, 0)) {  // Non-blocking read
-        if (echo) {
-            usbserial_send_tx(&ch, 1);  // Echo back
-        }
+//     while (usbserial_read_byte(&ch, 0)) {  // Non-blocking read
+//         if (echo) {
+//             usbserial_send_tx(&ch, 1);  // Echo back
+//         }
         
-        // Handle backspace/delete
-        if (ch == '\b' || ch == 0x7F) {
-            if (line_index > 0) {
-                line_index--;
-                if (echo) {
-                    // Echo backspace sequence: \b \b
-                    char bs[] = "\b \b";
-                    usbserial_send_tx((uint8_t*)bs, 3);
-                }
-            }
-            continue;
-        }
+//         // Handle backspace/delete
+//         if (ch == '\b' || ch == 0x7F) {
+//             if (line_index > 0) {
+//                 line_index--;
+//                 if (echo) {
+//                     // Echo backspace sequence: \b \b
+//                     char bs[] = "\b \b";
+//                     usbserial_send_tx((uint8_t*)bs, 3);
+//                 }
+//             }
+//             continue;
+//         }
         
-        // Handle carriage return / newline
-        if (ch == '\r' || ch == '\n') {
-            if (echo) {
-                char crlf[] = "\r\n";
-                usbserial_send_tx((uint8_t*)crlf, 2);
-            }
+//         // Handle carriage return / newline
+//         if (ch == '\r' || ch == '\n') {
+//             if (echo) {
+//                 char crlf[] = "\r\n";
+//                 usbserial_send_tx((uint8_t*)crlf, 2);
+//             }
             
-            // Copy line to user buffer
-            uint32_t copy_len = (line_index < max_len) ? line_index : max_len - 1;
-            memcpy(line_buffer, line, copy_len);
-            line_buffer[copy_len] = '\0';
+//             // Copy line to user buffer
+//             uint32_t copy_len = (line_index < max_len) ? line_index : max_len - 1;
+//             memcpy(line_buffer, line, copy_len);
+//             line_buffer[copy_len] = '\0';
             
-            uint32_t result = line_index;
-            line_index = 0;  // Reset for next line
+//             uint32_t result = line_index;
+//             line_index = 0;  // Reset for next line
             
-            return result;
-        }
+//             return result;
+//         }
         
-        // Normal character
-        if (line_index < sizeof(line) - 1) {
-            line[line_index++] = ch;
-        } else {
-            // Buffer overflow - send bell character
-            if (echo) {
-                char bell = 0x07;
-                usbserial_send_tx((uint8_t*)&bell, 1);
-            }
-        }
-    }
+//         // Normal character
+//         if (line_index < sizeof(line) - 1) {
+//             line[line_index++] = ch;
+//         } else {
+//             // Buffer overflow - send bell character
+//             if (echo) {
+//                 char bell = 0x07;
+//                 usbserial_send_tx((uint8_t*)&bell, 1);
+//             }
+//         }
+//     }
     
-    return 0;  // No complete line yet
-}
+//     return 0;  // No complete line yet
+// }
 
 static void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 {
