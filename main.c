@@ -4,15 +4,23 @@
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/cm3/systick.h>
 #include <libopencm3/cm3/nvic.h>
+
 #include "usbserial.h"
 #include "adc.h"
+#include "spi.h"
 
 volatile uint32_t clock_ticks = 0;
+    static uint32_t lasttick = 0;
 
 // SysTick interrupt handler
 void sys_tick_handler(void)
 {
     clock_ticks++; // ms
+
+    // if((clock_ticks/1000) != lasttick){
+    //     gpio_toggle(GPIOC, GPIO6);
+    //     lasttick = clock_ticks/1000;
+    // }
 }
 
 // Initialize SysTick for millisecond ticks
@@ -43,7 +51,6 @@ uint16_t ch0[ADC_BUF_LEN], ch1[ADC_BUF_LEN];
 
 int main(void)
 {
-    // bp_here();
 	// usbd_device *usbd_dev;
     struct rcc_clock_scale pllconfig = rcc_hse_8mhz_3v3[RCC_CLOCK_3V3_170MHZ];
 	rcc_clock_setup_pll(&pllconfig);
@@ -51,11 +58,7 @@ int main(void)
 
     /* Enable GPIOC clock */
     rcc_periph_clock_enable(RCC_GPIOC);
-
-    /* PC13 as push-pull output */
-    gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT,
-                    GPIO_PUPD_NONE, GPIO6);
-
+    // bp_here();
     /* Optional: slower edge, less EMI */
     gpio_set_output_options(GPIOC,
                             GPIO_OTYPE_PP,
@@ -64,10 +67,16 @@ int main(void)
 
     gpio_set(GPIOC, GPIO6);
 
+    /* PC13 as push-pull output */
+    gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT,
+                    GPIO_PUPD_NONE, GPIO6);
+
+
     usbserial_init();
     adc_dual_dma_init();
     usbserial_flush_rx();
     timer_adc_trigger_init();
+    spi_setup();
 
 	while (1) {
         static uint32_t lasttick = 0;
@@ -85,6 +94,7 @@ int main(void)
                 uint32_t s = snprintf(str,20,"%u,%u;",ch0[i],ch1[i]);
                 usbserial_send_tx(str,s);
             }
+            spi_tx8('A');
         }
 	}
 }

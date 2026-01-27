@@ -6,6 +6,6 @@
 
 void spi_setup(void);
 void spi_tx8(uint8_t data);
-void dds_write16(uint16_t word);
+// void dds_write16(uint16_t word);
 
 #endif
