@@ -71,6 +71,7 @@ int main(void)
 	while (1) {
         uint8_t buf[64];
         uint8_t len = usbserial_read_rx(buf,64);
+        // usbserial_send_tx(buf,len);
 
         for(uint32_t i = 0; i < len; i++)
         {
@@ -98,9 +99,9 @@ int main(void)
                     freq_status = 0;
                     freqw_buf = 0;
                     ad9833_set_freq_word(freqw);
-                    uint8_t buf[32];
-                    uint8_t s = snprintf(buf,32,"f=%d\r\n",freqw);
-                    usbserial_send_tx(buf,s);
+                    // uint8_t buf[32];
+                    // uint8_t s = snprintf(buf,32,"f=%d\r\n",freqw);
+                    // usbserial_send_tx(buf,s);
                 }
             }
             else if (buf[i] == 'M' || buf[i] == 'm')

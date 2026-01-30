@@ -120,9 +120,6 @@ void adc_dual_dma_init(void) {
 }
 
 void adc_capture_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
-    /* Reset completion flag */
-    adc_capture_complete = 0;
-    
     /* Reset DMA configuration */
     dma_disable_channel(DMA1, DMA_CHANNEL1);
     
@@ -153,13 +150,16 @@ void adc_capture_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
     ADC_CCR(ADC1) &= ~ADC_CCR_DUAL_MASK;
     ADC_CCR(ADC1) |= ADC_CCR_DUAL_REGULAR_SIMUL;
     
+    /* Reset completion flag */
+    adc_capture_complete = 0;
     /* Start conversions - ADC2 will start automatically in dual mode */
     adc_start_conversion_regular(ADC1);
     
     /* Wait for DMA transfer to complete */
     while (!adc_capture_complete) {
         __asm__("nop");
-        // Busy wait - you could add WFI here if interrupts are enabled
+        if(ADC_ISR(ADC1) & ADC_ISR_EOS)
+            adc_start_conversion_regular(ADC1);
     }
     
     /* De-interleave the packed 32-bit data */

@@ -156,6 +156,8 @@ static const char *usb_strings[] = {
 /* Buffer to be used for control requests. */
 uint8_t usbd_control_buffer[128];
 
+volatile uint8_t cdc_connected = 0;
+
 static enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_dev,
 	struct usb_setup_data *req, uint8_t **buf, uint16_t *len,
 	void (**complete)(usbd_device *usbd_dev, struct usb_setup_data *req))
@@ -166,11 +168,12 @@ static enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_d
 
 	switch (req->bRequest) {
 	case USB_CDC_REQ_SET_CONTROL_LINE_STATE: {
-		/*
-		 * This Linux cdc_acm driver requires this to be implemented
-		 * even though it's optional in the CDC spec, and we don't
-		 * advertise it in the ACM functional descriptor.
-		 */
+        if (req->wValue & 1) {   // DTR bit
+            cdc_connected = 1;
+            usbserial_flush_rx();   // important!
+        } else {
+            cdc_connected = 0;
+        }
 		return USBD_REQ_HANDLED;
 		}
 	case USB_CDC_REQ_SET_LINE_CODING:
@@ -263,19 +266,22 @@ static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
 {
     (void)ep;
 
+    if (!cdc_connected) {
+        // Drain and discard
+        char tmp[64];
+        usbd_ep_read_packet(usbd_dev, 0x01, tmp, sizeof(tmp));
+        return;
+    }
+
     char buf[64];
     uint32_t len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
 
-    // Store in receive buffer
-    for(uint32_t i = 0; i < len; i++) {
-        uint32_t next_rxi = (rxi + 1) % BUFF_SIZE;
-        // if(next_rxi != rxo) {  // Check buffer not full
+    for (uint32_t i = 0; i < len; i++) {
+        uint32_t next = (rxi + 1) % BUFF_SIZE;
+        if (next != rxo) {
             rxbuff[rxi] = buf[i];
-            rxi = next_rxi;
-        // } else {
-            // Buffer overflow - handle error
-            // break;
-        // }
+            rxi = next;
+        }
     }
 }
 
