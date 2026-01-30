@@ -63,7 +63,7 @@ class SweepGUI(QtWidgets.QMainWindow):
         
         # Set reasonable default ranges
         self.plot2.setYRange(2, 8)  # Ω range
-        self.plot2.setXRange(32700, 32800)  # Hz range
+        self.plot2.setXRange(32720, 32800)  # Hz range
         
         # Add right axis for phase using ViewBox method
         self.plot2.showAxis('right')
@@ -79,7 +79,7 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.plot2.scene().addItem(self.phase_vb)
         self.plot2.getAxis('right').linkToView(self.phase_vb)
         self.phase_vb.setXLink(self.plot2)
-        self.phase_vb.setYRange(-180, 180)
+        self.phase_vb.setYRange(-100, 100)
         
         self.plot_widget.ci.layout.setRowStretchFactor(0, 3)  # Oscilloscope: 30%
         self.plot_widget.ci.layout.setRowStretchFactor(1, 7)  # Analyzer: 70%
@@ -108,18 +108,25 @@ class SweepGUI(QtWidgets.QMainWindow):
 
         self.fi_box = QtWidgets.QSpinBox()
         self.fi_box.setRange(1, 1_000_000)
-        self.fi_box.setValue(32700)
+        self.fi_box.setValue(32720)
 
         self.fo_box = QtWidgets.QSpinBox()
         self.fo_box.setRange(1, 1_000_000)
         self.fo_box.setValue(32800)
         
-        # Known test resistor value (for calibration)
-        self.r_ref_label = QtWidgets.QLabel("R_ref (Ω):")
+        # Feedback resistor value (for calibration)
+        self.r_ref_label = QtWidgets.QLabel("R_ref (kΩ):")
         self.r_ref_box = QtWidgets.QDoubleSpinBox()
         self.r_ref_box.setRange(0.1, 100000)
-        self.r_ref_box.setValue(1000.0)
+        self.r_ref_box.setValue(1500.0)
         self.r_ref_box.setDecimals(1)
+
+        # Feedback capacitance field
+        self.c_ref_label = QtWidgets.QLabel("C_ref (pF):")
+        self.c_ref_box = QtWidgets.QDoubleSpinBox()
+        self.c_ref_box.setRange(0.1, 10000)
+        self.c_ref_box.setValue(10.0)  # Default 100 pF
+        self.c_ref_box.setDecimals(1)
 
         # Sampling parameters
         self.sample_rate_label = QtWidgets.QLabel("Sample Rate (kHz):")
@@ -127,6 +134,26 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.sample_rate_box.setRange(1000, 1000000)
         self.sample_rate_box.setValue(2833.3333)
         self.sample_rate_box.setDecimals(3)
+
+        # Time delay before starting sweep (ms)
+        self.start_delay_label = QtWidgets.QLabel("Start Delay (ms):")
+        self.start_delay_box = QtWidgets.QDoubleSpinBox()
+        self.start_delay_box.setRange(0, 10000)
+        self.start_delay_box.setValue(0.0)
+        self.start_delay_box.setDecimals(1)
+
+        # Delay between samples (ms)
+        self.sample_delay_label = QtWidgets.QLabel("Sample Delay (ms):")
+        self.sample_delay_box = QtWidgets.QDoubleSpinBox()
+        self.sample_delay_box.setRange(0, 10000)
+        self.sample_delay_box.setValue(0.0)
+        self.sample_delay_box.setDecimals(1)
+
+        # Number of measurements to average for each point
+        self.average_count_label = QtWidgets.QLabel("Average Count:")
+        self.average_count_box = QtWidgets.QSpinBox()
+        self.average_count_box.setRange(1, 100)
+        self.average_count_box.setValue(1)
 
         self.start_btn = QtWidgets.QPushButton("Start / Update")
         self.stop_btn = QtWidgets.QPushButton("Stop")
@@ -142,7 +169,11 @@ class SweepGUI(QtWidgets.QMainWindow):
         form.addRow("fi [Hz]:", self.fi_box)
         form.addRow("fo [Hz]:", self.fo_box)
         form.addRow(self.r_ref_label, self.r_ref_box)
+        form.addRow(self.c_ref_label, self.c_ref_box)  # Added capacitance field
         form.addRow(self.sample_rate_label, self.sample_rate_box)
+        form.addRow(self.start_delay_label, self.start_delay_box)  # Added start delay
+        form.addRow(self.sample_delay_label, self.sample_delay_box)  # Added sample delay
+        form.addRow(self.average_count_label, self.average_count_box)  # Added average count
         form.addRow(self.start_btn)
         form.addRow(self.stop_btn)
         form.addRow(self.clear_btn)
@@ -154,6 +185,8 @@ class SweepGUI(QtWidgets.QMainWindow):
 
         self.fw = 0
         self.fw_end = 0
+        self.sweep_started = False
+        self.waiting_for_start = False
         
         # Store sweep data
         self.frequencies = []
@@ -201,12 +234,34 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.phases.clear()
         self.plot2.setXRange(fi,fo)
 
+        self.sweep_started = False
+        self.waiting_for_start = True
+        
+        
+        cmd = f"ff{self.fw}a\r\n".encode()
+        self.ser.write(cmd)
+        
+        # Apply start delay before beginning sweep
+        start_delay_ms = self.start_delay_box.value()
+        if start_delay_ms > 0:
+            self.status.setText(f"Waiting {start_delay_ms}ms before starting...")
+            QtCore.QTimer.singleShot(int(start_delay_ms), self.begin_sweep)
+        else:
+            self.begin_sweep()
+
+    # --------------------------------------------------------
+    def begin_sweep(self):
+        """Start the actual sweep after initial delay"""
+        self.waiting_for_start = False
+        self.sweep_started = True
         self.status.setText("Sweeping...")
-        self.timer.start(1)   # 1 ms per step
+        self.timer.start(1)  # Start with minimal timer interval
 
     # --------------------------------------------------------
     def stop_sweep(self):
         self.timer.stop()
+        self.sweep_started = False
+        self.waiting_for_start = False
         self.status.setText("Stopped")
         
     # --------------------------------------------------------
@@ -223,13 +278,22 @@ class SweepGUI(QtWidgets.QMainWindow):
     def calculate_impedance_lsq(self, ch0, ch1, freq_hz):
         """
         Calculate impedance using least squares sine fit.
-        ch0: voltage across reference resistor
-        ch1: voltage across DUT
+        ch0: voltage across DUT (V_dut)
+        ch1: current through reference (I_ref) 
         freq_hz: known excitation frequency
-        Returns: impedance magnitude, phase (degrees)
+        
+        Impedance: Z_dut = V_dut / I_dut
+        But I_dut = I_ref (series circuit)
+        And V_ref = I_ref * Z_ref (parallel RC)
+        
+        So: Z_dut = V_dut / I_ref
+        Where I_ref is complex current from CH1
+        
+        Returns: impedance magnitude, phase (degrees), and phase of voltage channel for time alignment
         """
-        R_ref = self.r_ref_box.value()
-        sample_rate = self.sample_rate_box.value()*1000
+        R_ref = self.r_ref_box.value() * 1e3;
+        C_ref = self.c_ref_box.value() * 1e-12  # Convert pF to F
+        sample_rate = self.sample_rate_box.value() * 1000
         n_samples = len(ch0)
         
         # Time vector
@@ -246,26 +310,32 @@ class SweepGUI(QtWidgets.QMainWindow):
             np.ones_like(t)
         ])
         
-        # Fit ch0 (reference)
+        # Fit ch0 (V_dut - voltage across DUT)
         coeffs_ch0, *_ = np.linalg.lstsq(X, ch0, rcond=None)
-        A0, B0, C0 = coeffs_ch0
+        A_v, B_v, C_v = coeffs_ch0
         
-        # Fit ch1 (DUT)
+        # Fit ch1 (I_ref - current through reference)
         coeffs_ch1, *_ = np.linalg.lstsq(X, ch1, rcond=None)
-        A1, B1, C1 = coeffs_ch1
+        A_i, B_i, C_i = coeffs_ch1
         
         # Convert to complex amplitude
-        # V = A - jB  (since cos(ωt) + j sin(ωt) = e^{jωt})
-        V_ref_complex = A0 - 1j * B0
-        V_dut_complex = A1 - 1j * B1
+        # Signal = A*cos(ωt) + B*sin(ωt) = Re{(A - jB)e^{jωt}}
+        V_complex = A_v - 1j * B_v
+        I_complex = A_i - 1j * B_i
         
-        # Calculate impedance
-        # I_ref = V_ref / R_ref
-        # Z = V_dut / I_ref = V_dut * R_ref / V_ref
-        if abs(V_ref_complex) > 1e-10:  # Avoid division by zero
-            Z_complex = V_dut_complex * R_ref / V_ref_complex
-            Z_mag = abs(Z_complex)
-            Z_phase = np.angle(Z_complex, deg=True)
+        # Calculate phase of voltage channel for time alignment
+        voltage_phase = np.angle(I_complex)  # in radians
+        
+        # Calculate impedance of parallel RC reference
+        # Z_ref = (R_ref || C_ref) = 1/(1/R_ref + jωC_ref)
+        # Or equivalently: Z_ref = R_ref / (1 + jωR_refC_ref)
+        Z_ref_complex = R_ref / (1 + 1j * omega * R_ref * C_ref)
+        
+        # Calculate DUT impedance: Z_dut = V_dut / I_ref
+        if abs(I_complex) > 1e-10:  # Avoid division by zero
+            Z_dut_complex = I_complex / V_complex * Z_ref_complex
+            Z_mag = abs(Z_dut_complex)
+            Z_phase = np.angle(-Z_dut_complex, deg=True)
         else:
             Z_mag = 0
             Z_phase = 0
@@ -273,17 +343,19 @@ class SweepGUI(QtWidgets.QMainWindow):
         # Alternative simple amplitude ratio (fallback)
         if Z_mag == 0 or not np.isfinite(Z_mag):
             # Use amplitude ratio method
-            amp_ch0 = np.sqrt(A0**2 + B0**2)
-            amp_ch1 = np.sqrt(A1**2 + B1**2)
-            if amp_ch0 > 0:
-                Z_mag = (amp_ch1 / amp_ch0) * R_ref
+            amp_v = np.sqrt(A_v**2 + B_v**2)
+            amp_i = np.sqrt(A_i**2 + B_i**2)
+            if amp_i > 0:
+                Z_mag = amp_v / amp_i
                 # Approximate phase from phase difference
-                phase0 = np.arctan2(-B0, A0)  # Note: -B because of our convention
-                phase1 = np.arctan2(-B1, A1)
-                Z_phase = np.degrees(phase1 - phase0)
+                phase_v = np.arctan2(-B_v, A_v)  # Note: -B because of our convention
+                phase_i = np.arctan2(-B_i, A_i)
+                Z_phase = np.degrees(phase_v - phase_i)
+                voltage_phase = phase_v  # Use approximate phase
             else:
                 Z_mag = 0
                 Z_phase = 0
+                voltage_phase = 0
         
         # Normalize phase to [-180, 180]
         while Z_phase > 180:
@@ -291,59 +363,135 @@ class SweepGUI(QtWidgets.QMainWindow):
         while Z_phase < -180:
             Z_phase += 360
         
-        return Z_mag, Z_phase
+        return Z_mag, Z_phase, voltage_phase
 
     # --------------------------------------------------------
     def sweep_step(self):
+        if self.waiting_for_start:
+            return
+            
+        if not self.sweep_started:
+            return
+            
         if self.fw > self.fw_end:
             self.timer.stop()
+            self.sweep_started = False
             self.status.setText("Done")
             return
 
-        # ----- send frequency -----
-        cmd = f"ff{self.fw}a\r\n".encode()
-        self.ser.write(cmd)
-        time.sleep(0.0001)
-        self.ser.reset_output_buffer()
-
-        # ----- trigger measurement -----
-        self.ser.write(b"m")
-
-        raw = self.ser.read(1024 * 4)
-
-        if len(raw) != 1024 * 4:
-            self.timer.stop()
-            self.status.setText("Short read")
-            return
-
-        # ----- data conversion (bit-exact) -----
-        raw_u8 = np.frombuffer(raw, dtype=np.uint8)
-        data = raw_u8[0::2].astype(np.int16) + \
-               (raw_u8[1::2].astype(np.int16) << 8)
-
-        if data.size != 2048:
-            self.timer.stop()
-            self.status.setText("Frame error")
-            return
-
-        half = data.size // 2
-        ch0 = (data[:half]-2048)*3.3/4096
-        ch1 = (data[half:]-2048)*3.3/4096
-
-        # ----- update scope plot -----
-        self.curve0.setData(ch0)
-        self.curve1.setData(ch1)
-
-        # ----- get current frequency -----
-        freq_hz = self.fw / (2**28) * 25e6
+        # Get number of measurements to average
+        average_count = self.average_count_box.value()
         
-        # ----- calculate impedance using least squares -----
-        Z_mag, Z_phase = self.calculate_impedance_lsq(ch0, ch1, freq_hz)
+        # Arrays to store measurements for averaging
+        all_mag_measurements = []
+        all_phase_measurements = []
         
-        # ----- store data point -----
+        # Store the last measurement data for plotting
+        last_ch0 = None
+        last_ch1 = None
+        last_freq_hz = None
+        last_voltage_phase = 0
+        
+        # Perform multiple measurements at this frequency
+        for measurement_idx in range(average_count):
+            # ----- send frequency -----
+            cmd = f"ff{self.fw}a\r\n".encode()
+            self.ser.write(cmd)
+            time.sleep(0.0001)
+            self.ser.reset_output_buffer()
+
+            # Apply sample delay before measurement if set
+            sample_delay_ms = self.sample_delay_box.value()
+            if sample_delay_ms > 0:
+                time.sleep(sample_delay_ms / 1000.0)
+
+            # ----- trigger measurement -----
+            self.ser.write(b"m")
+
+            raw = self.ser.read(1024 * 4)
+
+            if len(raw) != 1024 * 4:
+                self.timer.stop()
+                self.sweep_started = False
+                self.status.setText("Short read")
+                return
+
+            # ----- data conversion (bit-exact) -----
+            raw_u8 = np.frombuffer(raw, dtype=np.uint8)
+            data = raw_u8[0::2].astype(np.int16) + \
+                   (raw_u8[1::2].astype(np.int16) << 8)
+
+            if data.size != 2048:
+                self.timer.stop()
+                self.sweep_started = False
+                self.status.setText("Frame error")
+                return
+
+            half = data.size // 2
+            ch0 = (data[:half]-2048)*3.3/4096  # V_dut (voltage across DUT)
+            ch1 = (data[half:]-2048)*3.3/4096  # I_ref (current through reference)
+
+            # Store last measurement for plotting
+            last_ch0 = ch0
+            last_ch1 = ch1
+            
+            # ----- get current frequency -----
+            freq_hz = self.fw / (2**28) * 25e6
+            last_freq_hz = freq_hz
+            
+            # ----- calculate impedance using least squares -----
+            Z_mag, Z_phase, voltage_phase = self.calculate_impedance_lsq(ch0, ch1, freq_hz)
+            last_voltage_phase = voltage_phase  # Store phase for time alignment
+            
+            # Store this measurement for averaging
+            if Z_mag > 0 and np.isfinite(Z_mag) and np.isfinite(Z_phase):
+                all_mag_measurements.append(Z_mag)
+                all_phase_measurements.append(Z_phase)
+                
+            # Update status during averaging
+            if average_count > 1:
+                self.status.setText(f"f = {freq_hz:.1f} Hz, Avg {measurement_idx+1}/{average_count}")
+        
+        # Calculate average of all valid measurements
+        if all_mag_measurements:
+            avg_mag = np.mean(all_mag_measurements)
+            avg_phase = np.mean(all_phase_measurements)
+        else:
+            avg_mag = 0
+            avg_phase = 0
+        
+        # ----- store averaged data point -----
+        freq_hz = last_freq_hz
         self.frequencies.append(freq_hz)
-        self.impedance_magnitudes.append(Z_mag)
-        self.phases.append(Z_phase)
+        self.impedance_magnitudes.append(avg_mag)
+        self.phases.append(avg_phase)
+        
+        # ----- update oscilloscope plot with proper time alignment -----
+        if last_ch0 is not None and last_ch1 is not None:
+            sample_rate = self.sample_rate_box.value() * 1000  # Convert kHz to Hz
+            n_samples = len(last_ch0)
+            
+            # Create time vector in microseconds
+            t = np.arange(n_samples) / sample_rate * 1e6  # Convert to microseconds
+            
+            # Calculate time offset from voltage phase (convert phase to time)
+            # Phase is in radians, convert to time delay: t_offset = phase / (2πf)
+            if freq_hz > 0:
+                t_offset = last_voltage_phase / (2 * np.pi * freq_hz) * 1e6  # Convert to microseconds
+            else:
+                t_offset = 0
+            
+            # Apply time offset to align waveforms
+            t_aligned = t + t_offset - 2e6/(freq_hz)
+            
+            # Plot with aligned time axis
+            self.curve0.setData(t_aligned, last_ch0)
+            self.curve1.setData(t_aligned, last_ch1)
+            
+            # Set appropriate x-axis range (show about 2 periods)
+            if freq_hz > 0:
+                period_us = 1e6 / freq_hz
+                self.plot.setXRange(0, 6 * period_us)
         
         # ----- update analyzer plots -----
         if len(self.frequencies) > 0:
@@ -359,7 +507,11 @@ class SweepGUI(QtWidgets.QMainWindow):
                 self.curve_mag.setData(freqs_np[valid_idx], mags_np[valid_idx])
                 self.curve_phase.setData(freqs_np[valid_idx], phases_np[valid_idx])
         
-        self.status.setText(f"f = {freq_hz:.1f} Hz, |Z| = {Z_mag:.2f} Ω, φ = {Z_phase:.1f}°")
+        # Update status with averaged result
+        if average_count > 1:
+            self.status.setText(f"f = {freq_hz:.1f} Hz, |Z| = {avg_mag:.2f} Ω (avg of {len(all_mag_measurements)}), φ = {avg_phase:.1f}°")
+        else:
+            self.status.setText(f"f = {freq_hz:.1f} Hz, |Z| = {avg_mag:.2f} Ω, φ = {avg_phase:.1f}°")
 
         self.fw += 1
 
