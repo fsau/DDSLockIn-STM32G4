@@ -47,6 +47,7 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.plot.showGrid(x=True, y=True)
         self.plot.setLabel('left', 'Amplitude', units='V')
         self.plot.setLabel('bottom', 'Time', units='us')
+        self.plot.getAxis('bottom').enableAutoSIPrefix(False)
         
         self.plot_widget.nextRow()
         
@@ -58,18 +59,20 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.plot2.setLogMode(y=True, x=False)
         self.plot2.setLabel('left', 'Impedance', units='Ω')
         self.plot2.setLabel('bottom', 'Frequency', units='Hz')
+        self.plot2.getAxis('left').enableAutoSIPrefix(False)
         
         # Set reasonable default ranges
-        self.plot2.setYRange(1, 10)  # Ω range
+        self.plot2.setYRange(2, 8)  # Ω range
         self.plot2.setXRange(32700, 32800)  # Hz range
         
         # Add right axis for phase using ViewBox method
         self.plot2.showAxis('right')
         right_axis = self.plot2.getAxis('right')
+        right_axis.setLogMode(y=False, x=False)
         right_axis.setLabel('Phase', units='°', color='b')
-        right_axis.setPen(color='b')
-        right_axis.setTickPen(color='r')
-        right_axis.setTextPen(color='b')
+        # right_axis.setPen(color='b')
+        # right_axis.setTickPen(color='b')
+        right_axis.setTextPen()
         
         # Create separate ViewBox for phase
         self.phase_vb = pg.ViewBox()
@@ -77,6 +80,9 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.plot2.getAxis('right').linkToView(self.phase_vb)
         self.phase_vb.setXLink(self.plot2)
         self.phase_vb.setYRange(-180, 180)
+        
+        self.plot_widget.ci.layout.setRowStretchFactor(0, 3)  # Oscilloscope: 30%
+        self.plot_widget.ci.layout.setRowStretchFactor(1, 7)  # Analyzer: 70%
         
         # Update connection
         self.update_views()
