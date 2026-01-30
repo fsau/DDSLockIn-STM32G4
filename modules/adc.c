@@ -165,15 +165,15 @@ void adc_capture_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
     /* De-interleave the packed 32-bit data */
     for (int i = 0; i < ADC_BUF_LEN; i++) {
         uint32_t packed = adc_buffer[i];
-        adc1_data[i] = (uint16_t)(packed & 0xFFFF);     // ADC1 in lower 16 bits
-        adc2_data[i] = (uint16_t)(packed >> 16);        // ADC2 in upper 16 bits
+        adc1_data[i] = (uint16_t)(packed & 0xFFFF);
+        adc2_data[i] = (uint16_t)(packed >> 16);   
     }
 }
 
-void timer_adc_trigger_init(void)
+void adc_timer_trigger_init(void)
 {
     /* Enable clocks */
-    rcc_periph_clock_enable(RCC_TIM1);
+    rcc_periph_clock_enable(RCC_TIM6);
     rcc_periph_clock_enable(RCC_ADC12);
 
     /* Timer setup */
@@ -182,20 +182,20 @@ void timer_adc_trigger_init(void)
     uint32_t prescaler = 0;        // no prescaler
     uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
 
-    timer_set_prescaler(TIM1, prescaler);
-    timer_set_period(TIM1, arr);
+    timer_set_prescaler(TIM6, prescaler);
+    timer_set_period(TIM6, arr);
 
     /* TRGO on update event */
-    timer_set_master_mode(TIM1, TIM_CR2_MMS_UPDATE);
+    timer_set_master_mode(TIM6, TIM_CR2_MMS_UPDATE);
 
     /* Enable counter */
-    timer_enable_counter(TIM1);
+    timer_enable_counter(TIM6);
 
     /* ADC setup */
     ADC_CFGR1(ADC1) &= ~ADC_CFGR1_CONT; // disable continuous mode
 
     adc_enable_external_trigger_regular(ADC1,
-        ADC12_CFGR1_EXTSEL_TIM1_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
+        ADC12_CFGR1_EXTSEL_TIM6_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
 }
 
 void adc_capture_buffer_no_dma(uint16_t *adc1_data, uint16_t *adc2_data, uint32_t num_samples) {

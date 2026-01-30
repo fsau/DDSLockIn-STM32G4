@@ -249,22 +249,25 @@ void reset_clocks_to_default(void)
 
 //     while (1); // fallback, should never reach here
 // }
+
 volatile uint32_t rxi = 0, rxo = 0;
 volatile uint32_t txi = 0, txo = 0;
-volatile uint8_t last_packet_was_full = 0;  // Track if last TX packet was full size
 
 uint8_t rxbuff[BUFF_SIZE];
 uint8_t txbuff[BUFF_SIZE];
+
+volatile uint32_t meas_flag = 0;
+volatile uint32_t freq_flag = 0;
 
 static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
 {
     (void)ep;
 
     char buf[64];
-    int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
+    uint32_t len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
 
     // Store in receive buffer
-    for(int i = 0; i < len; i++) {
+    for(uint32_t i = 0; i < len; i++) {
         uint32_t next_rxi = (rxi + 1) % BUFF_SIZE;
         // if(next_rxi != rxo) {  // Check buffer not full
             rxbuff[rxi] = buf[i];
@@ -274,84 +277,60 @@ static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
             // break;
         // }
     }
-
-    // Echo processing
-    if (len > 0) {
-        if (buf[0] == 'P' || buf[0] == 'p') {
-            char msg[160];
-            int msg_len = snprintf(msg, sizeof(msg), "t = %lu\r\n", clock_ticks);
-            usbd_ep_write_packet(usbd_dev, 0x82, msg, msg_len);
-            last_packet_was_full = 0;  // Reset since we sent variable length
-        } else if (buf[0] == 'r' || buf[0] == 'R') {
-            char msg[] = "Rebooting into bootloader...\r\n";
-            usbd_ep_write_packet(usbd_dev, 0x82, msg, sizeof(msg)-1);
-            last_packet_was_full = 0;  // Reset since we sent variable length
-        } else if((buf[0] >= '0') && (buf[0] <= '9')) {
-            for(int i = 0; i < 64; i++) txbuff[i] = buf[0];
-            usbd_ep_write_packet(usbd_dev, 0x82, txbuff, 64);
-            last_packet_was_full = 1;  // Mark that we sent a full packet
-        } else {
-            // Normal echo + increment
-            for (int i = 0; i < len; i++) {
-                buf[i]++;
-            }
-            uint32_t sent = usbd_ep_write_packet(usbd_dev, 0x82, buf, len);
-            last_packet_was_full = (sent == 64) ? 1 : 0;  // Track if full packet
-        }
-    }
 }
+
+volatile uint8_t tx_busy = 0, tx_zlp = 0;
 
 static void cdcacm_data_tx_cb(usbd_device *usbd_dev, uint8_t ep)
 {
     (void)ep;
-    (void)usbd_dev;
 
-    if(txi != txo) {
-        uint32_t len;
-        
-        // Calculate available data length
-        if(txo > txi) {
-            len = txo - txi;
-        } else {
-            len = BUFF_SIZE - txi;
-        }
-        
-        // Limit to USB packet size
-        if(len > 64) len = 64;
-        
-        // Send data
-        uint32_t sent = usbd_ep_write_packet(usbd_dev, 0x82, &txbuff[txi], len);
-        
-        if(sent > 0) {
-            txi = (txi + sent) % BUFF_SIZE;
-            last_packet_was_full = (sent == 64) ? 1 : 0;  // Track if full packet
-        }
-    } else {
-        // No more data to send, check if we need to send ZLP
-        if(last_packet_was_full) {
-            // Send Zero-Length Packet to indicate end of transfer
+    disable_irq();
+    if (txi == txo) {
+        if(tx_zlp) {
             usbd_ep_write_packet(usbd_dev, 0x82, NULL, 0);
-            last_packet_was_full = 0;  // Reset the flag
+            tx_zlp = 0;
+        } else {
+            tx_busy = 0;   // TX idle
+        }
+        return;
+    }
+
+    uint32_t len = (txo > txi) ? (txo - txi) : (BUFF_SIZE - txi);
+    if (len > 64) len = 64;
+
+    uint32_t sent = usbd_ep_write_packet(usbd_dev, 0x82, &txbuff[txi], len);
+
+    if (sent) {
+        txi = (txi + sent) % BUFF_SIZE;
+        tx_busy = 1;
+        if((txi == txo)&&(sent == 64)) {
+            tx_zlp = 1;
         }
     }
+    enable_irq();
 }
 
-void usbserial_send_tx(uint8_t* data, uint32_t len)
+void usbserial_send_tx(uint8_t *data, uint32_t len)
 {
-    // Add data to transmit buffer
-    for(uint32_t i = 0; i < len; i++) {
-        uint32_t next_txo = (txo + 1) % BUFF_SIZE;
-        if(next_txo != txi) {  // Check buffer not full
-            txbuff[txo] = data[i];
-            txo = next_txo;
-        } else {
-            // Buffer overflow
-            break;
+    uint32_t i = 0;
+
+    while (i < len) {
+        disable_irq();
+        uint32_t next = (txo + 1) % BUFF_SIZE;
+
+        if (next != txi) {
+            txbuff[txo] = data[i++];
+            txo = next;
         }
+
+        /* Kick TX if idle */
+        if (!tx_busy) {
+            tx_busy = 1;
+            cdcacm_data_tx_cb(usbd_dev, 0x82);
+        }
+        enable_irq();
     }
-    
-    // Trigger transmission
-    cdcacm_data_tx_cb(usbd_dev, 0);
 }
 
 /**
@@ -530,70 +509,12 @@ uint32_t usbserial_process_rx(usbserial_process_cb_t process_callback, void* con
     return bytes_processed;
 }
 
-// uint32_t usbserial_read_line(char* line_buffer, uint32_t max_len, uint8_t echo)
-// {
-//     static char line[256];
-//     static uint32_t line_index = 0;
-    
-//     uint8_t ch;
-    
-//     while (usbserial_read_byte(&ch, 0)) {  // Non-blocking read
-//         if (echo) {
-//             usbserial_send_tx(&ch, 1);  // Echo back
-//         }
-        
-//         // Handle backspace/delete
-//         if (ch == '\b' || ch == 0x7F) {
-//             if (line_index > 0) {
-//                 line_index--;
-//                 if (echo) {
-//                     // Echo backspace sequence: \b \b
-//                     char bs[] = "\b \b";
-//                     usbserial_send_tx((uint8_t*)bs, 3);
-//                 }
-//             }
-//             continue;
-//         }
-        
-//         // Handle carriage return / newline
-//         if (ch == '\r' || ch == '\n') {
-//             if (echo) {
-//                 char crlf[] = "\r\n";
-//                 usbserial_send_tx((uint8_t*)crlf, 2);
-//             }
-            
-//             // Copy line to user buffer
-//             uint32_t copy_len = (line_index < max_len) ? line_index : max_len - 1;
-//             memcpy(line_buffer, line, copy_len);
-//             line_buffer[copy_len] = '\0';
-            
-//             uint32_t result = line_index;
-//             line_index = 0;  // Reset for next line
-            
-//             return result;
-//         }
-        
-//         // Normal character
-//         if (line_index < sizeof(line) - 1) {
-//             line[line_index++] = ch;
-//         } else {
-//             // Buffer overflow - send bell character
-//             if (echo) {
-//                 char bell = 0x07;
-//                 usbserial_send_tx((uint8_t*)&bell, 1);
-//             }
-//         }
-//     }
-    
-//     return 0;  // No complete line yet
-// }
-
 static void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 {
 	(void)wValue;
 
 	usbd_ep_setup(usbd_dev, 0x01, USB_ENDPOINT_ATTR_BULK, 64, cdcacm_data_rx_cb);
-	usbd_ep_setup(usbd_dev, 0x82, USB_ENDPOINT_ATTR_BULK, 64, NULL);
+	usbd_ep_setup(usbd_dev, 0x82, USB_ENDPOINT_ATTR_BULK, 64, cdcacm_data_tx_cb);
 	usbd_ep_setup(usbd_dev, 0x83, USB_ENDPOINT_ATTR_INTERRUPT, 16, NULL);
 
 	usbd_register_control_callback(

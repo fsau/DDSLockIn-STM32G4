@@ -5,6 +5,7 @@
 #include <libopencm3/usb/usbd.h>
 
 extern volatile uint32_t clock_ticks;
+extern volatile uint32_t freqw;
 
 // Buffer size for USB serial
 #ifndef BUFF_SIZE

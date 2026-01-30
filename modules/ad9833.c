@@ -3,23 +3,29 @@
 #include "spi.h"
 #include "ad9833.h"
 
+volatile uint32_t freqw = 352187;
+
 void ad9833_write16(uint16_t word)
 {
     gpio_clear(FSYNC_PORT, FSYNC_PIN);
 
+    for(uint32_t i = 0; i < 1000; i++);
     spi_tx8(word >> 8);
+    for(uint32_t i = 0; i < 100; i++);
     spi_tx8(word & 0xFF);
+    for(uint32_t i = 0; i < 1000; i++);
 
     gpio_set(FSYNC_PORT, FSYNC_PIN);
+    for(uint32_t i = 0; i < 1000; i++);
 }
 
 void ad9833_init(void)
 {
-    /* FSYNC */
-    /* PC13 as push-pull output */
-    gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT,
+    gpio_mode_setup(FSYNC_PORT, GPIO_MODE_OUTPUT,
                     GPIO_PUPD_NONE, FSYNC_PIN);
     gpio_set(FSYNC_PORT, FSYNC_PIN);
+
+    for(uint32_t i = 0; i < 100000; i++);
 
     ad9833_write16(0x2100);   // RESET=1, B28=1
 }

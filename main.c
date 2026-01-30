@@ -8,11 +8,11 @@
 #include "usbserial.h"
 #include "adc.h"
 #include "spi.h"
+#include "ad9833.h"
 
 volatile uint32_t clock_ticks = 0;
-    static uint32_t lasttick = 0;
+static uint32_t lasttick = 0;
 
-// SysTick interrupt handler
 void sys_tick_handler(void)
 {
     clock_ticks++; // ms
@@ -43,58 +43,84 @@ void delay_ms(uint32_t ms)
         __asm__("nop");
 }
 
-__attribute__((noinline))
 void bp_here(void) {__asm__ volatile ("bkpt #0");;}
-
 
 uint16_t ch0[ADC_BUF_LEN], ch1[ADC_BUF_LEN];
 
 int main(void)
 {
-	// usbd_device *usbd_dev;
     struct rcc_clock_scale pllconfig = rcc_hse_8mhz_3v3[RCC_CLOCK_3V3_170MHZ];
 	rcc_clock_setup_pll(&pllconfig);
     systick_setup(170000000); // 1kHz
-
-    /* Enable GPIOC clock */
     rcc_periph_clock_enable(RCC_GPIOC);
-    // bp_here();
-    /* Optional: slower edge, less EMI */
+
+    gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT,
+                    GPIO_PUPD_NONE, GPIO6);
     gpio_set_output_options(GPIOC,
                             GPIO_OTYPE_PP,
                             GPIO_OSPEED_2MHZ,
                             GPIO6);
-
     gpio_set(GPIOC, GPIO6);
-
-    /* PC13 as push-pull output */
-    gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT,
-                    GPIO_PUPD_NONE, GPIO6);
-
 
     usbserial_init();
     adc_dual_dma_init();
-    usbserial_flush_rx();
-    timer_adc_trigger_init();
+    adc_timer_trigger_init();
     spi_setup();
+    ad9833_init();
 
 	while (1) {
-        static uint32_t lasttick = 0;
+        uint8_t buf[64];
+        uint8_t len = usbserial_read_rx(buf,64);
 
-        if((clock_ticks/1000) != lasttick){
-            lasttick = clock_ticks/1000;
-            uint8_t teststr[64];
-            uint8_t s = usbserial_read_rx(teststr,64);
-            usbserial_send_tx(teststr,s);
-            gpio_toggle(GPIOC, GPIO6);
-            adc_capture_buffer(ch0,ch1);
-            // adc_capture_buffer_no_dma(ch0,ch1,10);
-            for(uint32_t i = 0; i < 10; i++){
-                char str[30];
-                uint32_t s = snprintf(str,20,"%u,%u;",ch0[i],ch1[i]);
-                usbserial_send_tx(str,s);
+        for(uint32_t i = 0; i < len; i++)
+        {
+            static uint8_t freq_status = 0;
+            static uint32_t freqw_buf = 0;
+
+            if(freq_status != 0)
+            {
+                bool endflag = 0;
+                if((buf[i] >= '0') && (buf[i] <= '9'))
+                {
+                    freq_status++;
+                    uint8_t digit = buf[i] - '0';
+                    freqw_buf *= 10;
+                    freqw_buf += digit;
+                }
+                else
+                {
+                    endflag=1;
+                }
+
+                if((freq_status > 10) || endflag)
+                {
+                    freqw = freqw_buf;
+                    freq_status = 0;
+                    freqw_buf = 0;
+                    ad9833_set_freq_word(freqw);
+                    uint8_t buf[32];
+                    uint8_t s = snprintf(buf,32,"f=%d\r\n",freqw);
+                    usbserial_send_tx(buf,s);
+                }
             }
-            spi_tx8('A');
+            else if (buf[i] == 'M' || buf[i] == 'm')
+            {
+                adc_capture_buffer(ch0,ch1);
+                usbserial_send_tx((uint8_t*)ch0,sizeof(ch0));
+                usbserial_send_tx((uint8_t*)ch1,sizeof(ch1));
+            }
+            else if (buf[i] == 'F' || buf[i] == 'f')
+            {
+                freq_status = 1;
+                freqw_buf = 0;
+            }
+        }
+
+        if((clock_ticks/100) != lasttick)
+        {
+            lasttick = clock_ticks/100;
+            gpio_toggle(GPIOC, GPIO6);
+            ad9833_set_freq_word(freqw);
         }
 	}
 }
