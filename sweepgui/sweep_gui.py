@@ -27,8 +27,8 @@ class SweepGUI(QMainWindow):
         self.impedance_calculator = None
         self.csv_saver = None
         
-        # NEW: Track if we're starting a new sweep in hold mode
-        self.new_sweep_in_hold = False
+        # NEW: Track if we need to insert nan for new sweep in hold mode
+        self.insert_nan_next_point = False
         
         # Setup UI
         self.setup_ui()
@@ -72,10 +72,12 @@ class SweepGUI(QMainWindow):
         self.fi_box = QSpinBox()
         self.fi_box.setRange(1, 1_000_000)
         self.fi_box.setValue(32720)
+        self.fi_box.setSuffix(" Hz")
         
         self.fo_box = QSpinBox()
         self.fo_box.setRange(1, 1_000_000)
         self.fo_box.setValue(32800)
+        self.fo_box.setSuffix(" Hz")
         
         self.delta_fw_box = QSpinBox()
         self.delta_fw_box.setRange(1, 1000)
@@ -86,31 +88,42 @@ class SweepGUI(QMainWindow):
         self.r_ref_box.setRange(0.1, 100000)
         self.r_ref_box.setValue(2000.0)
         self.r_ref_box.setDecimals(1)
+        self.r_ref_box.setSuffix(" kΩ")
         
         self.c_ref_box = QDoubleSpinBox()
         self.c_ref_box.setRange(0.1, 10000)
         self.c_ref_box.setValue(10.5)
         self.c_ref_box.setDecimals(1)
+        self.c_ref_box.setSuffix(" pF")
         
         # Sampling controls
         self.sample_rate_box = QDoubleSpinBox()
         self.sample_rate_box.setRange(1000, 1000000)
         self.sample_rate_box.setValue(2833.3333)
         self.sample_rate_box.setDecimals(3)
+        self.sample_rate_box.setSuffix(" kHz")
         
         self.start_delay_box = QDoubleSpinBox()
         self.start_delay_box.setRange(0, 10000)
         self.start_delay_box.setValue(0.0)
         self.start_delay_box.setDecimals(1)
+        self.start_delay_box.setSuffix(" ms")
         
         self.sample_delay_box = QDoubleSpinBox()
         self.sample_delay_box.setRange(0, 10000)
         self.sample_delay_box.setValue(0.0)
         self.sample_delay_box.setDecimals(1)
+        self.sample_delay_box.setSuffix(" ms")
         
         self.average_count_box = QSpinBox()
         self.average_count_box.setRange(1, 100)
         self.average_count_box.setValue(1)
+        
+        # Amplitude control
+        self.amplitude_box = QSpinBox()
+        self.amplitude_box.setRange(0, 100)
+        self.amplitude_box.setValue(100)
+        self.amplitude_box.setSuffix(" %")
         
         # Hold plot checkbox
         self.hold_plot_checkbox = QCheckBox()
@@ -139,14 +152,15 @@ class SweepGUI(QMainWindow):
         self.status.setAlignment(Qt.AlignRight)
         
         # Add rows to form
-        form.addRow("fi [Hz]:", self.fi_box)
-        form.addRow("fo [Hz]:", self.fo_box)
+        form.addRow("Initial frequency:", self.fi_box)
+        form.addRow("Final frequency:", self.fo_box)
         form.addRow("Δfw per step:", self.delta_fw_box)
-        form.addRow("R_ref (kΩ):", self.r_ref_box)
-        form.addRow("C_ref (pF):", self.c_ref_box)
-        form.addRow("Sample Rate (kHz):", self.sample_rate_box)
-        form.addRow("Start Delay (ms):", self.start_delay_box)
-        form.addRow("Sample Delay (ms):", self.sample_delay_box)
+        form.addRow("Amplitude:", self.amplitude_box)
+        form.addRow("Feedback R:", self.r_ref_box)
+        form.addRow("Feedback C:", self.c_ref_box)
+        form.addRow("Sample Rate:", self.sample_rate_box)
+        form.addRow("Start Delay:", self.start_delay_box)
+        form.addRow("Sample Delay:", self.sample_delay_box)
         form.addRow("Average Count:", self.average_count_box)
         form.addRow("Hold Plot:", self.hold_plot_checkbox)
         form.addRow(self.start_btn)
@@ -215,13 +229,13 @@ class SweepGUI(QMainWindow):
             self.serial_sweep.phases.clear()
             self.serial_sweep.detailed_data.clear()
             self.plot_manager.clear_plots()
-            self.new_sweep_in_hold = False  # Reset flag
+            self.insert_nan_next_point = False  # Reset flag
         else:
             # When holding, clear only the detailed data (for CSV)
             # But keep the frequency/magnitude/phase arrays for plotting
             self.serial_sweep.detailed_data.clear()
-            # Set flag to indicate new sweep in hold mode
-            self.new_sweep_in_hold = True
+            # Set flag to insert nan before first point of new sweep
+            self.insert_nan_next_point = True
             # Don't clear the plot
         
         # Set plot range
@@ -260,8 +274,8 @@ class SweepGUI(QMainWindow):
         self.generate_new_filename()
         # Also uncheck hold plot when clearing
         self.hold_plot_checkbox.setChecked(False)
-        # Reset the hold flag
-        self.new_sweep_in_hold = False
+        # Reset the nan flag
+        self.insert_nan_next_point = False
     
     def on_sweep_step_callback(self, measurements, fw):
         """Callback for each sweep step"""
@@ -282,7 +296,7 @@ class SweepGUI(QMainWindow):
             
             # Calculate impedance
             (Z_mag, Z_phase, voltage_phase, rms_residuals_ch0, rms_residuals_ch1,
-             C_v, C_i, A_v, B_v, A_i, B_i, V_complex, I_complex) = \
+            C_v, C_i, A_v, B_v, A_i, B_i, V_complex, I_complex) = \
                 self.impedance_calculator.calculate_impedance_lsq(
                     ch0, ch1, freq_hz, sample_rate
                 )
@@ -358,23 +372,26 @@ class SweepGUI(QMainWindow):
                 period_us = 1e6 / freq_hz
                 self.plot_manager.plot.setXRange(0, 6 * period_us)
         
-        # Update analyzer plot
-        if self.hold_plot_checkbox.isChecked():
-            # In hold mode, add point to existing plot
-            self.plot_manager.add_measurement(
-                freq_hz, avg_mag, avg_phase, 
-                is_new_sweep=self.new_sweep_in_hold
-            )
-            # Reset the flag after first point
-            if self.new_sweep_in_hold:
-                self.new_sweep_in_hold = False
-        else:
-            # Not in hold mode, update entire plot
-            self.plot_manager.update_analyzer(
-                self.serial_sweep.frequencies + [freq_hz],
-                self.serial_sweep.impedance_magnitudes + [avg_mag],
-                self.serial_sweep.phases + [avg_phase]
-            )
+        # Check if we need to insert nan BEFORE adding the new point
+        if self.hold_plot_checkbox.isChecked() and self.insert_nan_next_point:
+            # Insert nan values to break the line between sweeps
+            self.serial_sweep.frequencies.append(np.nan)
+            self.serial_sweep.impedance_magnitudes.append(np.nan)
+            self.serial_sweep.phases.append(np.nan)
+            self.insert_nan_next_point = False
+        
+        # Append the current measurement data to the serial_sweep arrays
+        # This ensures the plot has all data including the current point
+        self.serial_sweep.frequencies.append(freq_hz)
+        self.serial_sweep.impedance_magnitudes.append(avg_mag)
+        self.serial_sweep.phases.append(avg_phase)
+        
+        # Update analyzer plot with ALL accumulated data
+        self.plot_manager.update_analyzer(
+            self.serial_sweep.frequencies,
+            self.serial_sweep.impedance_magnitudes,
+            self.serial_sweep.phases
+        )
         
         # Update status
         freq_display = format_frequency(freq_hz)
@@ -401,7 +418,7 @@ class SweepGUI(QMainWindow):
         self.status.setText(status_text)
         self.status.verticalScrollBar().setValue(self.status.verticalScrollBar().maximum())
         
-        # Return data for storage
+        # Return data for storage (serial_sweep will append this again, but that's OK)
         return {
             'freq_hz': freq_hz,
             'Z_mag_avg': avg_mag,

@@ -26,29 +26,31 @@ def format_impedance(z_mag):
 
 def generate_new_filename(current_filename):
     """Generate a new filename with auto-numbering based on existing files"""
-    # Extract base name and existing counter
-    match = re.match(r'^(.*?)(?:_(\d{3}))?\.csv$', current_filename)
+    import glob
     
-    if match:
-        base_name = match.group(1)
-        existing_counter = match.group(2)
-        
-        if existing_counter:
-            # Start from existing counter + 1
-            counter = int(existing_counter) + 1
-            base_name = base_name.rstrip('_')  # Remove trailing underscore if present
-        else:
-            # No counter found, start from 001
-            counter = 1
-    else:
-        # No .csv extension or pattern doesn't match
-        base_name = re.sub(r'\.csv$', '', current_filename)
-        if not base_name:
-            base_name = "sweep_data"
-        counter = 1
+    # Extract base name from current filename
+    # Remove .csv extension and any trailing _XXX pattern
+    base_name = re.sub(r'\.csv$', '', current_filename)
+    base_name = re.sub(r'_(\d{3})$', '', base_name)
     
-    # Find the next available number if file exists
-    while os.path.exists(f"{base_name}_{counter:03d}.csv"):
-        counter += 1
+    if not base_name:
+        base_name = "sweep_data"
     
-    return f"{base_name}_{counter:03d}.csv"
+    # Find all existing files with this base name
+    existing_files = glob.glob(f"{base_name}_*.csv")
+    
+    if not existing_files:
+        # No files exist, start from 001
+        return f"{base_name}_001.csv"
+    
+    # Extract counters from existing files and find the maximum
+    max_counter = 0
+    for file in existing_files:
+        match = re.search(r'_(\d{3})\.csv$', file)
+        if match:
+            counter = int(match.group(1))
+            if counter > max_counter:
+                max_counter = counter
+    
+    # Use next number
+    return f"{base_name}_{max_counter + 1:03d}.csv"

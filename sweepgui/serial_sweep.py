@@ -149,9 +149,8 @@ class SerialSweep:
         if self.on_sweep_step:
             result = self.on_sweep_step(measurements, self.fw)
             if result:
-                self.frequencies.append(result['freq_hz'])
-                self.impedance_magnitudes.append(result['Z_mag_avg'])
-                self.phases.append(result['Z_phase_avg'])
+                # Data arrays (frequencies, magnitudes, phases) are already updated in callback
+                # Only store detailed data for CSV
                 self.detailed_data.append(result['detailed_data'])
         
         # Increment frequency

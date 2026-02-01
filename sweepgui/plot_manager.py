@@ -6,13 +6,6 @@ class PlotManager:
     def __init__(self):
         self.plot_widget = pg.GraphicsLayoutWidget()
         self.setup_plots()
-        # Track sweeps separately for hold mode
-        self.current_sweep_freq = []
-        self.current_sweep_mag = []
-        self.current_sweep_phase = []
-        self.all_sweeps_freq = []
-        self.all_sweeps_mag = []
-        self.all_sweeps_phase = []
         
     def setup_plots(self):
         """Setup oscilloscope and analyzer plots"""
@@ -59,9 +52,18 @@ class PlotManager:
         self.curve0 = self.plot.plot(pen='y', name="CH0")
         self.curve1 = self.plot.plot(pen='c', name="CH1")
         self.curve_mag = self.plot2.plot(pen='r', symbol='o', symbolPen='r', 
-                                         symbolBrush='r', symbolSize=5, name="|Z|")
-        self.curve_phase = pg.PlotCurveItem(pen='b', symbol='s', symbolPen='b',
-                                           symbolBrush='b', symbolSize=5, name="Phase")
+                                        symbolBrush='r', symbolSize=5, name="|Z|")
+        
+        # Create phase curve with explicit connect mode
+        self.curve_phase = pg.PlotCurveItem(
+            pen='b', 
+            symbol='s', 
+            symbolPen='b',
+            symbolBrush='b', 
+            symbolSize=5, 
+            name="Phase",
+            connect='finite'  # Explicitly set to break at nan/inf
+        )
         self.phase_vb.addItem(self.curve_phase)
         
         # Legend
@@ -91,66 +93,17 @@ class PlotManager:
             mags_np = np.array(magnitudes)
             phases_np = np.array(phases)
             
-            # Filter out invalid values
-            valid_idx = (mags_np > 0) & np.isfinite(mags_np) & np.isfinite(phases_np)
+            # Plot ALL data including nan values
+            # pyqtgraph will automatically break lines at nan values
+            # and won't draw symbols at nan points
+            self.curve_mag.setData(freqs_np, mags_np)
+            self.curve_phase.setData(freqs_np, phases_np)
             
-            if np.any(valid_idx):
-                self.curve_mag.setData(freqs_np[valid_idx], mags_np[valid_idx])
-                self.curve_phase.setData(freqs_np[valid_idx], phases_np[valid_idx])
-    
     def clear_plots(self):
         """Clear all plot data"""
         self.curve_mag.setData([], [])
         self.curve_phase.setData([], [])
-        # Also clear sweep tracking
-        self.current_sweep_freq.clear()
-        self.current_sweep_mag.clear()
-        self.current_sweep_phase.clear()
-        self.all_sweeps_freq.clear()
-        self.all_sweeps_mag.clear()
-        self.all_sweeps_phase.clear()
     
     def set_xrange(self, fi, fo):
         """Set X range for analyzer plot"""
         self.plot2.setXRange(fi, fo)
-        
-    def add_measurement(self, frequency, magnitude, phase, is_new_sweep=False):
-        """Add a single measurement point to the plot (for hold mode)"""
-        if magnitude > 0 and np.isfinite(magnitude) and np.isfinite(phase):
-            # Start new sweep if requested
-            if is_new_sweep:
-                # Save current sweep to all sweeps
-                if self.current_sweep_freq:
-                    self.all_sweeps_freq.append(np.array(self.current_sweep_freq))
-                    self.all_sweeps_mag.append(np.array(self.current_sweep_mag))
-                    self.all_sweeps_phase.append(np.array(self.current_sweep_phase))
-                # Start new sweep
-                self.current_sweep_freq = []
-                self.current_sweep_mag = []
-                self.current_sweep_phase = []
-            
-            # Add to current sweep
-            self.current_sweep_freq.append(frequency)
-            self.current_sweep_mag.append(magnitude)
-            self.current_sweep_phase.append(phase)
-            
-            # Combine all sweeps for plotting
-            all_freq = []
-            all_mag = []
-            all_phase = []
-            
-            for i, sweep_freq in enumerate(self.all_sweeps_freq):
-                all_freq.extend(sweep_freq)
-                all_mag.extend(self.all_sweeps_mag[i])
-                all_phase.extend(self.all_sweeps_phase[i])
-            
-            # Add current sweep
-            if self.current_sweep_freq:
-                all_freq.extend(self.current_sweep_freq)
-                all_mag.extend(self.current_sweep_mag)
-                all_phase.extend(self.current_sweep_phase)
-            
-            # Update plot
-            if all_freq:
-                self.curve_mag.setData(np.array(all_freq), np.array(all_mag))
-                self.curve_phase.setData(np.array(all_freq), np.array(all_phase))
