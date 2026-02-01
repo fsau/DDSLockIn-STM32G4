@@ -16,11 +16,6 @@ static uint32_t lasttick = 0;
 void sys_tick_handler(void)
 {
     clock_ticks++; // ms
-
-    // if((clock_ticks/1000) != lasttick){
-    //     gpio_toggle(GPIOC, GPIO6);
-    //     lasttick = clock_ticks/1000;
-    // }
 }
 
 // Initialize SysTick for millisecond ticks
@@ -78,6 +73,8 @@ void dpot_init(void)
 
 void dpot_set(uint8_t new_pos)
 {
+    if(new_pos > 100) new_pos = 100; // Limit to maximum
+    
     if(new_pos > dpot_pos) {
         // Need to increase
         gpio_set(GPIOC, GPIO10); // Set direction to increase
@@ -109,6 +106,11 @@ void dpot_set(uint8_t new_pos)
     // If equal, do nothing
     
     dpot_pos = new_pos;
+    
+    // Optional: Send confirmation back
+    // uint8_t buf[32];
+    // uint8_t s = snprintf(buf, 32, "DPOT set to %d\r\n", dpot_pos);
+    // usbserial_send_tx(buf, s);
 }
 
 int main(void)
@@ -133,58 +135,83 @@ int main(void)
     ad9833_init();
     dpot_init();
 
+    // Command parsing states
+    enum {
+        CMD_IDLE,
+        CMD_FREQ,
+        CMD_DPOT
+    } cmd_state = CMD_IDLE;
+    
+    uint32_t cmd_value = 0;
+    uint8_t cmd_digits = 0;
+
 	while (1) {
         uint8_t buf[64];
-        uint8_t len = usbserial_read_rx(buf,64);
-        // usbserial_send_tx(buf,len);
+        uint8_t len = usbserial_read_rx(buf, 64);
 
         for(uint32_t i = 0; i < len; i++)
         {
-            static uint8_t freq_status = 0;
-            static uint32_t freqw_buf = 0;
-
-            if(freq_status != 0)
-            {
-                bool endflag = 0;
-                if((buf[i] >= '0') && (buf[i] <= '9'))
-                {
-                    freq_status++;
-                    uint8_t digit = buf[i] - '0';
-                    freqw_buf *= 10;
-                    freqw_buf += digit;
-                }
-                else
-                {
-                    endflag=1;
-                }
-
-                if((freq_status > 10) || endflag)
-                {
-                    freqw = freqw_buf;
-                    freq_status = 0;
-                    freqw_buf = 0;
-                    ad9833_set_freq_word(freqw);
-                    // uint8_t buf[32];
-                    // uint8_t s = snprintf(buf,32,"f=%d\r\n",freqw);
-                    // usbserial_send_tx(buf,s);
-                }
-            }
-            else if (buf[i] == 'M' || buf[i] == 'm')
-            {
-                adc_capture_buffer(ch0,ch1);
-                usbserial_send_tx((uint8_t*)ch0,sizeof(ch0));
-                usbserial_send_tx((uint8_t*)ch1,sizeof(ch1));
-            }
-            else if (buf[i] == 'F' || buf[i] == 'f')
-            {
-                freq_status = 1;
-                freqw_buf = 0;
-            }
-            else if (buf[i] == 'A' || buf[i] == 'a')
-            {
-                static uint8_t pos = 0;
-                pos = (pos+1)%100;
-                dpot_set(pos);
+            switch(cmd_state) {
+                case CMD_IDLE:
+                    if(buf[i] == 'F' || buf[i] == 'f') {
+                        // Start frequency command
+                        cmd_state = CMD_FREQ;
+                        cmd_value = 0;
+                        cmd_digits = 0;
+                    }
+                    else if(buf[i] == 'A' || buf[i] == 'a') {
+                        // Start dpot command
+                        cmd_state = CMD_DPOT;
+                        cmd_value = 0;
+                        cmd_digits = 0;
+                    }
+                    else if(buf[i] == 'M' || buf[i] == 'm') {
+                        // ADC capture command (immediate)
+                        adc_capture_buffer(ch0, ch1);
+                        usbserial_send_tx((uint8_t*)ch0, sizeof(ch0));
+                        usbserial_send_tx((uint8_t*)ch1, sizeof(ch1));
+                    }
+                    // Add other immediate commands here if needed
+                    break;
+                    
+                case CMD_FREQ:
+                    if(buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 10) {
+                        // Accumulate digits
+                        cmd_value = cmd_value * 10 + (buf[i] - '0');
+                        cmd_digits++;
+                    } else {
+                        // Non-digit or max digits reached - execute command
+                        freqw = cmd_value;
+                        ad9833_set_freq_word(freqw);
+                        
+                        // Reset to idle state
+                        cmd_state = CMD_IDLE;
+                        cmd_value = 0;
+                        cmd_digits = 0;
+                        
+                        // Optional: send confirmation
+                        // uint8_t confirm_buf[32];
+                        // uint8_t s = snprintf(confirm_buf, 32, "Freq set to %lu\r\n", freqw);
+                        // usbserial_send_tx(confirm_buf, s);
+                    }
+                    break;
+                    
+                case CMD_DPOT:
+                    if(buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 3) {
+                        // Accumulate digits (max 3 digits for 0-100)
+                        cmd_value = cmd_value * 10 + (buf[i] - '0');
+                        cmd_digits++;
+                    } else {
+                        // Non-digit or max digits reached - execute command
+                        if(cmd_value > 100) cmd_value = 100; // Clamp to max
+                        dpot_set((uint8_t)cmd_value);
+                        
+                        // Reset to idle state
+                        cmd_state = CMD_IDLE;
+                        cmd_value = 0;
+                        cmd_digits = 0;
+                    }
+                    break;
             }
         }
 

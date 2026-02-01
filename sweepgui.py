@@ -7,6 +7,9 @@ import pyqtgraph as pg
 from pyqtgraph.Qt import QtWidgets, QtCore
 from scipy import optimize  # For least squares
 from PyQt5.QtCore import Qt
+import os
+from datetime import datetime
+import re
 
 # ------------------------------------------------------------
 # Same helper as Octave
@@ -71,8 +74,6 @@ class SweepGUI(QtWidgets.QMainWindow):
         right_axis = self.plot2.getAxis('right')
         right_axis.setLogMode(y=False, x=False)
         right_axis.setLabel('Phase', units='°', color='b')
-        # right_axis.setPen(color='b')
-        # right_axis.setTickPen(color='b')
         right_axis.setTextPen()
         
         # Create separate ViewBox for phase
@@ -132,7 +133,7 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.c_ref_label = QtWidgets.QLabel("C_ref (pF):")
         self.c_ref_box = QtWidgets.QDoubleSpinBox()
         self.c_ref_box.setRange(0.1, 10000)
-        self.c_ref_box.setValue(10.5)  # Default 100 pF
+        self.c_ref_box.setValue(10.5)
         self.c_ref_box.setDecimals(1)
 
         # Sampling parameters
@@ -166,15 +167,28 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.stop_btn = QtWidgets.QPushButton("Stop")
         self.clear_btn = QtWidgets.QPushButton("Clear Data")
         
+        # CSV Save Button and fields
+        self.save_btn = QtWidgets.QPushButton("Save to CSV")
+        
+        # Filename field (with auto-numbering)
+        self.filename_label = QtWidgets.QLabel("Filename:")
+        self.filename_edit = QtWidgets.QLineEdit()
+        self.filename_edit.setText("sweep_data_001.csv")
+        
+        # Notes field
+        self.notes_label = QtWidgets.QLabel("Notes:")
+        self.notes_edit = QtWidgets.QTextEdit()
+        self.notes_edit.setMaximumHeight(60)
+        self.notes_edit.setPlaceholderText("Enter notes for this measurement...")
+        
         # Create a text edit widget for multi-line status with right alignment
         self.status = QtWidgets.QTextEdit()
         self.status.setReadOnly(True)
-        self.status.setMaximumHeight(100)  # Limit height to prevent it from taking too much space
+        self.status.setMinimumHeight(110)
         self.status.setText("Idle")
         
         # Set right alignment
         alignment = self.status.alignment()
-        # self.status.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.status.setAlignment(alignment)
         
         # Legend
@@ -185,19 +199,25 @@ class SweepGUI(QtWidgets.QMainWindow):
 
         form.addRow("fi [Hz]:", self.fi_box)
         form.addRow("fo [Hz]:", self.fo_box)
-        form.addRow(self.delta_fw_label, self.delta_fw_box)  # Added delta fw
+        form.addRow(self.delta_fw_label, self.delta_fw_box)
         form.addRow(self.r_ref_label, self.r_ref_box)
-        form.addRow(self.c_ref_label, self.c_ref_box)  # Added capacitance field
+        form.addRow(self.c_ref_label, self.c_ref_box)
         form.addRow(self.sample_rate_label, self.sample_rate_box)
-        form.addRow(self.start_delay_label, self.start_delay_box)  # Added start delay
-        form.addRow(self.sample_delay_label, self.sample_delay_box)  # Added sample delay
-        form.addRow(self.average_count_label, self.average_count_box)  # Added average count
+        form.addRow(self.start_delay_label, self.start_delay_box)
+        form.addRow(self.sample_delay_label, self.sample_delay_box)
+        form.addRow(self.average_count_label, self.average_count_box)
         form.addRow(self.start_btn)
         form.addRow(self.stop_btn)
         form.addRow(self.clear_btn)
+        
+        # Add separator
+        form.addRow(QtWidgets.QLabel("--- Save Options ---"))
+        form.addRow(self.filename_label, self.filename_edit)
+        form.addRow(self.notes_label, self.notes_edit)
+        form.addRow(self.save_btn)
+        
         spacer = QtWidgets.QSpacerItem(20, 40)
         form.addItem(spacer)
-        # form.addRow(QtWidgets.QLabel("Status:"))
         form.addRow(self.status)
 
         # ---------------- Sweep state ----------------
@@ -213,13 +233,55 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.frequencies = []
         self.impedance_magnitudes = []
         self.phases = []
+        
+        # Store detailed data for CSV export
+        self.detailed_data = []  # List of dictionaries with all measured data
 
         self.start_btn.clicked.connect(self.start_sweep)
         self.stop_btn.clicked.connect(self.stop_sweep)
         self.clear_btn.clicked.connect(self.clear_data)
+        self.save_btn.clicked.connect(self.save_to_csv)
         
         # Connect plot resize
         self.plot2.sigRangeChanged.connect(self.update_views)
+        
+        # Initialize filename with suggestion
+        self.generate_new_filename()
+
+    # --------------------------------------------------------
+    def generate_new_filename(self):
+        """Generate a new filename with auto-numbering based on existing files"""
+        current_filename = self.filename_edit.text().strip()
+        
+        # Extract base name and existing counter
+        match = re.match(r'^(.*?)(?:_(\d{3}))?\.csv$', current_filename)
+        
+        if match:
+            base_name = match.group(1)
+            existing_counter = match.group(2)
+            
+            if existing_counter:
+                # Start from existing counter + 1
+                counter = int(existing_counter) + 1
+                base_name = base_name.rstrip('_')  # Remove trailing underscore if present
+            else:
+                # No counter found, start from 001
+                counter = 1
+        else:
+            # No .csv extension or pattern doesn't match
+            base_name = re.sub(r'\.csv$', '', current_filename)
+            if not base_name:
+                base_name = "sweep_data"
+            counter = 1
+        
+        # Find the next available number if file exists
+        while os.path.exists(f"{base_name}_{counter:03d}.csv"):
+            counter += 1
+        
+        # Set the filename without triggering textChanged
+        self.filename_edit.blockSignals(True)
+        self.filename_edit.setText(f"{base_name}_{counter:03d}.csv")
+        self.filename_edit.blockSignals(False)
 
     # --------------------------------------------------------
     def update_views(self):
@@ -253,11 +315,11 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.frequencies.clear()
         self.impedance_magnitudes.clear()
         self.phases.clear()
+        self.detailed_data.clear()
         self.plot2.setXRange(fi,fo)
 
         self.sweep_started = False
         self.waiting_for_start = True
-        
         
         cmd = f"ff{self.fw}a\r\n".encode()
         self.ser.write(cmd)
@@ -291,9 +353,12 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.frequencies.clear()
         self.impedance_magnitudes.clear()
         self.phases.clear()
+        self.detailed_data.clear()
         self.curve_mag.setData([], [])
         self.curve_phase.setData([], [])
         self.status.setText("Data cleared")
+        # Generate a new filename for next save
+        self.generate_new_filename()
 
     # --------------------------------------------------------
     def calculate_impedance_lsq(self, ch0, ch1, freq_hz):
@@ -311,9 +376,9 @@ class SweepGUI(QtWidgets.QMainWindow):
         Where I_ref is complex current from CH1
         
         Returns: impedance magnitude, phase (degrees), phase of voltage channel for time alignment,
-                 residuals for both channels, and DC levels
+                 residuals for both channels, and DC levels, and all fitted parameters
         """
-        R_ref = self.r_ref_box.value() * 1e3;
+        R_ref = self.r_ref_box.value() * 1e3
         C_ref = self.c_ref_box.value() * 1e-12  # Convert pF to F
         sample_rate = self.sample_rate_box.value() * 1000
         n_samples = len(ch0)
@@ -396,7 +461,8 @@ class SweepGUI(QtWidgets.QMainWindow):
         else:
             rms_residuals_ch1 = 0
         
-        return Z_mag, Z_phase, voltage_phase, rms_residuals_ch0, rms_residuals_ch1, C_v, C_i
+        return (Z_mag, Z_phase, voltage_phase, rms_residuals_ch0, rms_residuals_ch1, 
+                C_v, C_i, A_v, B_v, A_i, B_i, V_complex, I_complex)
 
     # --------------------------------------------------------
     def sweep_step(self):
@@ -410,6 +476,8 @@ class SweepGUI(QtWidgets.QMainWindow):
             self.timer.stop()
             self.sweep_started = False
             self.status.setText("Done")
+            # Generate new filename for next save after sweep completes
+            self.generate_new_filename()
             return
 
         # Get number of measurements to average
@@ -418,6 +486,9 @@ class SweepGUI(QtWidgets.QMainWindow):
         # Arrays to store measurements for averaging
         all_mag_measurements = []
         all_phase_measurements = []
+        
+        # Store detailed data for this frequency point
+        freq_detailed_data = []
         
         # Store the last measurement data for plotting
         last_ch0 = None
@@ -428,6 +499,12 @@ class SweepGUI(QtWidgets.QMainWindow):
         last_rms_residuals_ch1 = 0
         last_dc_ch0 = 0
         last_dc_ch1 = 0
+        last_A_v = 0
+        last_B_v = 0
+        last_A_i = 0
+        last_B_i = 0
+        last_V_complex = 0+0j
+        last_I_complex = 0+0j
         
         # Perform multiple measurements at this frequency
         for measurement_idx in range(average_count):
@@ -477,12 +554,44 @@ class SweepGUI(QtWidgets.QMainWindow):
             last_freq_hz = freq_hz
             
             # ----- calculate impedance using least squares -----
-            Z_mag, Z_phase, voltage_phase, rms_residuals_ch0, rms_residuals_ch1, dc_ch0, dc_ch1 = self.calculate_impedance_lsq(ch0, ch1, freq_hz)
-            last_voltage_phase = voltage_phase  # Store phase for time alignment
+            (Z_mag, Z_phase, voltage_phase, rms_residuals_ch0, rms_residuals_ch1, 
+             dc_ch0, dc_ch1, A_v, B_v, A_i, B_i, V_complex, I_complex) = self.calculate_impedance_lsq(ch0, ch1, freq_hz)
+            
+            # Store all values
+            last_voltage_phase = voltage_phase
             last_rms_residuals_ch0 = rms_residuals_ch0
             last_rms_residuals_ch1 = rms_residuals_ch1
             last_dc_ch0 = dc_ch0
             last_dc_ch1 = dc_ch1
+            last_A_v = A_v
+            last_B_v = B_v
+            last_A_i = A_i
+            last_B_i = B_i
+            last_V_complex = V_complex
+            last_I_complex = I_complex
+            
+            # Store this measurement in detailed data
+            measurement_data = {
+                'measurement_idx': measurement_idx,
+                'freq_word': self.fw,
+                'freq_hz': freq_hz,
+                'Z_mag': Z_mag,
+                'Z_phase': Z_phase,
+                'V_complex_real': V_complex.real,
+                'V_complex_imag': V_complex.imag,
+                'I_complex_real': I_complex.real,
+                'I_complex_imag': I_complex.imag,
+                'A_v': A_v,
+                'B_v': B_v,
+                'A_i': A_i,
+                'B_i': B_i,
+                'dc_ch0': dc_ch0,
+                'dc_ch1': dc_ch1,
+                'rms_residuals_ch0': rms_residuals_ch0,
+                'rms_residuals_ch1': rms_residuals_ch1,
+                'voltage_phase_rad': voltage_phase
+            }
+            freq_detailed_data.append(measurement_data)
             
             # Store this measurement for averaging
             if Z_mag > 0 and np.isfinite(Z_mag) and np.isfinite(Z_phase):
@@ -507,6 +616,16 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.frequencies.append(freq_hz)
         self.impedance_magnitudes.append(avg_mag)
         self.phases.append(avg_phase)
+        
+        # Store detailed data for this frequency point
+        self.detailed_data.append({
+            'freq_word': self.fw,
+            'freq_hz': freq_hz,
+            'Z_mag_avg': avg_mag,
+            'Z_phase_avg': avg_phase,
+            'measurements': freq_detailed_data,
+            'avg_count': average_count
+        })
         
         # ----- update oscilloscope plot with proper time alignment -----
         if last_ch0 is not None and last_ch1 is not None:
@@ -549,29 +668,135 @@ class SweepGUI(QtWidgets.QMainWindow):
                 self.curve_mag.setData(freqs_np[valid_idx], mags_np[valid_idx])
                 self.curve_phase.setData(freqs_np[valid_idx], phases_np[valid_idx])
         
+        # Format frequency with auto-scaling
+        if freq_hz >= 1e6:
+            freq_display = f"{freq_hz/1e6:.5f} MHz"
+        elif freq_hz >= 1e3:
+            freq_display = f"{freq_hz/1e3:.4f} kHz"
+        else:
+            freq_display = f"{freq_hz:.1f} Hz"
+        
+        # Format impedance with auto-scaling
+        if avg_mag >= 1e6:
+            z_display = f"{avg_mag/1e6:.2f} MΩ"
+        elif avg_mag >= 1e3:
+            z_display = f"{avg_mag/1e3:.2f} kΩ"
+        else:
+            z_display = f"{avg_mag:.2f} Ω"
+        
         # Update status with detailed information
         if average_count > 1:
             status_text = (
-                f"f = {freq_hz:.1f} Hz\n"
-                f"|Z| = {avg_mag:.2f} Ω (avg of {len(all_mag_measurements)})\n"
+                f"f = {freq_display}\n"
+                f"|Z| = {z_display} (avg of {len(all_mag_measurements)})\n"
                 f"φ = {avg_phase:.1f}°\n"
                 f"Residuals: V={last_rms_residuals_ch0*1e3:.2f}mV, I={last_rms_residuals_ch1*1e3:.2f}mV\n"
                 f"DC: V={last_dc_ch0*1e3:.1f}mV, I={last_dc_ch1*1e3:.1f}mV"
             )
         else:
             status_text = (
-                f"f = {freq_hz:.1f} Hz\n"
-                f"|Z| = {avg_mag:.2f} Ω\n"
+                f"f = {freq_display}\n"
+                f"|Z| = {z_display}\n"
                 f"φ = {avg_phase:.1f}°\n"
                 f"Residuals: V={last_rms_residuals_ch0*1e3:.2f}mV, I={last_rms_residuals_ch1*1e3:.2f}mV\n"
                 f"DC: V={last_dc_ch0*1e3:.1f}mV, I={last_dc_ch1*1e3:.1f}mV"
             )
         
         self.status.setText(status_text)
+        # Scroll to the bottom to see the latest status
+        self.status.verticalScrollBar().setValue(self.status.verticalScrollBar().maximum())
 
         # Increment fw by delta_fw instead of 1
         delta_fw = self.delta_fw_box.value()
         self.fw += delta_fw
+
+    # --------------------------------------------------------
+    def save_to_csv(self):
+        """Save all sweep data to a CSV file"""
+        if not self.detailed_data:
+            self.status.setText("No data to save")
+            return
+        
+        # Get filename from the edit field
+        filename = self.filename_edit.text().strip()
+        if not filename:
+            # Use default if empty
+            filename = "sweep_data_001.csv"
+        
+        # Remove any existing .csv extension and add it fresh
+        filename = re.sub(r'\.csv$', '', filename) + '.csv'
+        
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                # Write comment with notes and parameters
+                notes = self.notes_edit.toPlainText().strip()
+                if notes:
+                    f.write(f"# Notes: {notes}\n")
+                
+                # Write timestamp
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"# Timestamp: {timestamp}\n")
+                
+                # Write parameters
+                f.write(f"# Parameters:\n")
+                f.write(f"# fi = {self.fi_box.value()} Hz\n")
+                f.write(f"# fo = {self.fo_box.value()} Hz\n")
+                f.write(f"# delta_fw = {self.delta_fw_box.value()}\n")
+                f.write(f"# R_ref = {self.r_ref_box.value()} kΩ\n")
+                f.write(f"# C_ref = {self.c_ref_box.value()} pF\n")
+                f.write(f"# Sample rate = {self.sample_rate_box.value()} kHz\n")
+                f.write(f"# Start delay = {self.start_delay_box.value()} ms\n")
+                f.write(f"# Sample delay = {self.sample_delay_box.value()} ms\n")
+                f.write(f"# Average count = {self.average_count_box.value()}\n")
+                f.write("\n")
+                
+                # Write header
+                header = [
+                    "freq_word", "freq_hz", "Z_mag_avg", "Z_phase_avg_deg",
+                    "measurement_idx", "V_complex_real", "V_complex_imag",
+                    "I_complex_real", "I_complex_imag", "A_v", "B_v", "A_i", "B_i",
+                    "dc_ch0", "dc_ch1", "rms_residuals_ch0", "rms_residuals_ch1",
+                    "voltage_phase_rad"
+                ]
+                f.write(",".join(header) + "\n")
+                
+                # Write data
+                for freq_data in self.detailed_data:
+                    freq_word = freq_data['freq_word']
+                    freq_hz = freq_data['freq_hz']
+                    Z_mag_avg = freq_data['Z_mag_avg']
+                    Z_phase_avg = freq_data['Z_phase_avg']
+                    
+                    for measurement in freq_data['measurements']:
+                        row = [
+                            str(freq_word),
+                            f"{freq_hz:.6f}",
+                            f"{Z_mag_avg:.6f}",
+                            f"{Z_phase_avg:.6f}",
+                            str(measurement['measurement_idx']),
+                            f"{measurement['V_complex_real']:.6f}",
+                            f"{measurement['V_complex_imag']:.6f}",
+                            f"{measurement['I_complex_real']:.6f}",
+                            f"{measurement['I_complex_imag']:.6f}",
+                            f"{measurement['A_v']:.6f}",
+                            f"{measurement['B_v']:.6f}",
+                            f"{measurement['A_i']:.6f}",
+                            f"{measurement['B_i']:.6f}",
+                            f"{measurement['dc_ch0']:.6f}",
+                            f"{measurement['dc_ch1']:.6f}",
+                            f"{measurement['rms_residuals_ch0']:.6f}",
+                            f"{measurement['rms_residuals_ch1']:.6f}",
+                            f"{measurement['voltage_phase_rad']:.6f}"
+                        ]
+                        f.write(",".join(row) + "\n")
+            
+            self.status.setText(f"Data saved to {filename}")
+            
+            # Generate new filename for next save
+            self.generate_new_filename()
+            
+        except Exception as e:
+            self.status.setText(f"Error saving file: {str(e)}")
 
 
 # ------------------------------------------------------------
