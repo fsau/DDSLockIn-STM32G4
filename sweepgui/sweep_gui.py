@@ -223,7 +223,7 @@ class SweepGUI(QMainWindow):
         amp_i = np.sqrt(A_i**2 + B_i**2)
         
         # Target range for optimal measurement (volts)
-        MIN_TARGET_AMPLITUDE = 0.3  # V - minimum for good SNR
+        MIN_TARGET_AMPLITUDE = 0.79  # V - minimum for good SNR
         MAX_ALLOWED_AMPLITUDE = 0.8  # V - maximum to avoid clipping (with margin)
         
         # Get the larger of the two amplitudes (worst case for clipping)
@@ -316,51 +316,51 @@ class SweepGUI(QMainWindow):
         
         return variation < threshold
     
-    def perform_measurement_with_auto_delay(self, fw, amplitude, average_count):
-        """Perform measurement with automatic delay until stable"""
-        max_retries = 10
-        base_delay = self.sample_delay_box.value()
-        min_measurements_for_check = max(3, average_count)
+    # def perform_measurement_with_auto_delay(self, fw, amplitude, average_count):
+    #     """Perform measurement with automatic delay until stable"""
+    #     max_retries = 10
+    #     base_delay = self.sample_delay_box.value()
+    #     min_measurements_for_check = max(3, average_count)
         
-        all_measurements = []
+    #     all_measurements = []
         
-        for retry in range(max_retries):
-            current_delay = base_delay + (retry * 100)  # Increase delay by 100ms each retry
+    #     for retry in range(max_retries):
+    #         current_delay = base_delay + (retry * 100)  # Increase delay by 100ms each retry
             
-            # Perform measurements
-            measurements, error = self.serial_sweep.perform_measurement(
-                fw, amplitude, min_measurements_for_check, current_delay
-            )
+    #         # Perform measurements
+    #         measurements, error = self.serial_sweep.perform_measurement(
+    #             fw, amplitude, min_measurements_for_check, current_delay
+    #         )
             
-            if error:
-                return measurements, error
+    #         if error:
+    #             return measurements, error
             
-            # Add to all measurements
-            all_measurements.extend(measurements)
+    #         # Add to all measurements
+    #         all_measurements.extend(measurements)
             
-            # Check if we have enough measurements to assess stability
-            if len(all_measurements) >= 3:
-                # Check stability with amplitude-aware adaptive threshold
-                if self.check_stability(all_measurements, amplitude):
-                    # Stable! Return only the requested number of measurements
-                    # Use the most recent measurements
-                    if len(all_measurements) > average_count:
-                        return all_measurements[-average_count:], None
-                    else:
-                        return all_measurements, None
+    #         # Check if we have enough measurements to assess stability
+    #         if len(all_measurements) >= 3:
+    #             # Check stability with amplitude-aware adaptive threshold
+    #             if self.check_stability(all_measurements, amplitude):
+    #                 # Stable! Return only the requested number of measurements
+    #                 # Use the most recent measurements
+    #                 if len(all_measurements) > average_count:
+    #                     return all_measurements[-average_count:], None
+    #                 else:
+    #                     return all_measurements, None
             
-            # Update status without freezing
-            if retry > 0:
-                self.status.setText(f"Auto delay: retry {retry}, delay: {current_delay}ms")
-                # Process events to update UI but don't sleep
-                QApplication.processEvents()
+    #         # Update status without freezing
+    #         if retry > 0:
+    #             self.status.setText(f"Auto delay: retry {retry}, delay: {current_delay}ms")
+    #             # Process events to update UI but don't sleep
+    #             QApplication.processEvents()
         
-        # If we get here, we've used all retries
-        # Return the most recent measurements anyway
-        if len(all_measurements) > average_count:
-            return all_measurements[-average_count:], None
-        else:
-            return all_measurements, None
+    #     # If we get here, we've used all retries
+    #     # Return the most recent measurements anyway
+    #     if len(all_measurements) > average_count:
+    #         return all_measurements[-average_count:], None
+    #     else:
+    #         return all_measurements, None
     
     def start_sweep(self):
         """Start the frequency sweep"""
