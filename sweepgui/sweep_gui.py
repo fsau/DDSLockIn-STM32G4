@@ -83,6 +83,12 @@ class SweepGUI(QMainWindow):
         self.delta_fw_box.setRange(1, 1000)
         self.delta_fw_box.setValue(1)
         
+        # Amplitude control
+        self.amplitude_box = QSpinBox()
+        self.amplitude_box.setRange(0, 100)
+        self.amplitude_box.setValue(100)
+        self.amplitude_box.setSuffix(" %")
+        
         # Calibration controls
         self.r_ref_box = QDoubleSpinBox()
         self.r_ref_box.setRange(0.1, 100000)
@@ -107,23 +113,17 @@ class SweepGUI(QMainWindow):
         self.start_delay_box.setRange(0, 10000)
         self.start_delay_box.setValue(0.0)
         self.start_delay_box.setDecimals(1)
-        self.start_delay_box.setSuffix(" ms")
+        self.start_delay_box.setSuffix("  ms")
         
         self.sample_delay_box = QDoubleSpinBox()
         self.sample_delay_box.setRange(0, 10000)
         self.sample_delay_box.setValue(0.0)
         self.sample_delay_box.setDecimals(1)
-        self.sample_delay_box.setSuffix(" ms")
+        self.sample_delay_box.setSuffix("  ms")
         
         self.average_count_box = QSpinBox()
         self.average_count_box.setRange(1, 100)
         self.average_count_box.setValue(1)
-        
-        # Amplitude control
-        self.amplitude_box = QSpinBox()
-        self.amplitude_box.setRange(0, 100)
-        self.amplitude_box.setValue(100)
-        self.amplitude_box.setSuffix(" %")
         
         # Hold plot checkbox
         self.hold_plot_checkbox = QCheckBox()
@@ -152,15 +152,15 @@ class SweepGUI(QMainWindow):
         self.status.setAlignment(Qt.AlignRight)
         
         # Add rows to form
-        form.addRow("Initial frequency:", self.fi_box)
-        form.addRow("Final frequency:", self.fo_box)
+        form.addRow("f initial:", self.fi_box)
+        form.addRow("f final:", self.fo_box)
         form.addRow("Δfw per step:", self.delta_fw_box)
         form.addRow("Amplitude:", self.amplitude_box)
-        form.addRow("Feedback R:", self.r_ref_box)
-        form.addRow("Feedback C:", self.c_ref_box)
+        form.addRow("R_ref:", self.r_ref_box)
+        form.addRow("C_ref:", self.c_ref_box)
         form.addRow("Sample Rate:", self.sample_rate_box)
-        form.addRow("Start Delay:", self.start_delay_box)
-        form.addRow("Sample Delay:", self.sample_delay_box)
+        form.addRow("Start Delay", self.start_delay_box)
+        form.addRow("Sample Delay", self.sample_delay_box)
         form.addRow("Average Count:", self.average_count_box)
         form.addRow("Hold Plot:", self.hold_plot_checkbox)
         form.addRow(self.start_btn)
@@ -204,6 +204,7 @@ class SweepGUI(QMainWindow):
         """Start the frequency sweep"""
         fi = self.fi_box.value()
         fo = self.fo_box.value()
+        amplitude = self.amplitude_box.value()
         
         if fo < fi:
             self.status.setText("fo < fi")
@@ -242,7 +243,7 @@ class SweepGUI(QMainWindow):
         self.plot_manager.set_xrange(fi, fo)
         
         # Start sweep with clear_data flag
-        delay = self.serial_sweep.start_sweep(fi, fo, delta_fw, start_delay_ms, clear_data)
+        delay = self.serial_sweep.start_sweep(fi, fo, delta_fw, amplitude, start_delay_ms, clear_data)
         
         if delay > 0:
             self.status.setText(f"Waiting {delay}ms before starting...")
@@ -311,6 +312,7 @@ class SweepGUI(QMainWindow):
                 'measurement_idx': measurement['measurement_idx'],
                 'freq_word': measurement['freq_word'],
                 'freq_hz': freq_hz,
+                'amplitude': measurement['amplitude'],
                 'Z_mag': Z_mag,
                 'Z_phase': Z_phase,
                 'V_complex_real': V_complex.real,
@@ -442,11 +444,12 @@ class SweepGUI(QMainWindow):
     def sweep_step(self):
         """Execute one sweep step"""
         delta_fw = self.delta_fw_box.value()
+        amplitude = self.amplitude_box.value()
         average_count = self.average_count_box.value()
         sample_delay_ms = self.sample_delay_box.value()
         
         continue_sweep, error = self.serial_sweep.sweep_step(
-            delta_fw, average_count, sample_delay_ms
+            delta_fw, amplitude, average_count, sample_delay_ms
         )
         
         if error:
@@ -464,6 +467,7 @@ class SweepGUI(QMainWindow):
             'fi': self.fi_box.value(),
             'fo': self.fo_box.value(),
             'delta_fw': self.delta_fw_box.value(),
+            'Amplitude': f"{self.amplitude_box.value()}%",
             'R_ref': self.r_ref_box.value(),
             'C_ref': self.c_ref_box.value(),
             'Sample rate': self.sample_rate_box.value(),

@@ -24,6 +24,7 @@ class SerialSweep:
         self.fw_end = 0
         self.sweep_started = False
         self.waiting_for_start = False
+        self.current_amplitude = 0
         
         # Data storage
         self.frequencies = []
@@ -43,10 +44,11 @@ class SerialSweep:
             self.ser.read(self.ser.in_waiting)
             time.sleep(0.01)
     
-    def start_sweep(self, fi, fo, delta_fw, start_delay_ms=0, clear_data=True):
+    def start_sweep(self, fi, fo, delta_fw, amplitude=0, start_delay_ms=0, clear_data=True):
         """Start a frequency sweep"""
         self.fw = fs(fi)  # Now fs is imported
         self.fw_end = fs(fo)
+        self.current_amplitude = amplitude
         
         # Clear previous data only if requested
         if clear_data:
@@ -62,6 +64,12 @@ class SerialSweep:
         cmd = f"ff{self.fw}a\r\n".encode()
         self.ser.write(cmd)
         
+        # Set amplitude if non-zero
+        if amplitude > 0:
+            time.sleep(0.001)  # Small delay
+            amp_cmd = f"aa{amplitude:03d}a\r\n".encode()
+            self.ser.write(amp_cmd)
+        
         return start_delay_ms
     
     def begin_sweep(self):
@@ -75,7 +83,7 @@ class SerialSweep:
         self.sweep_started = False
         self.waiting_for_start = False
     
-    def perform_measurement(self, fw, average_count=1, sample_delay_ms=0):
+    def perform_measurement(self, fw, amplitude=0, average_count=1, sample_delay_ms=0):
         """Perform measurement at a specific frequency word"""
         all_mag_measurements = []
         all_phase_measurements = []
@@ -83,9 +91,10 @@ class SerialSweep:
         
         for measurement_idx in range(average_count):
             # Send frequency
-            cmd = f"ff{fw}a\r\n".encode()
+            cmd = f"ff{fw}aa{amplitude:03d}xx".encode()
             self.ser.write(cmd)
-            time.sleep(0.0001)
+            time.sleep(0.001)
+            
             self.ser.reset_output_buffer()
 
             # Apply sample delay
@@ -118,6 +127,7 @@ class SerialSweep:
                 'measurement_idx': measurement_idx,
                 'freq_word': fw,
                 'freq_hz': freq_hz,
+                'amplitude': amplitude,
                 'ch0': ch0,
                 'ch1': ch1
             }
@@ -125,7 +135,7 @@ class SerialSweep:
         
         return freq_detailed_data, None
     
-    def sweep_step(self, delta_fw, average_count, sample_delay_ms):
+    def sweep_step(self, delta_fw, amplitude=0, average_count=1, sample_delay_ms=0):
         """Execute one step of the sweep"""
         if self.waiting_for_start or not self.sweep_started:
             return True, None
@@ -136,9 +146,18 @@ class SerialSweep:
                 self.on_sweep_complete()
             return False, "Done"
         
+        # Check if amplitude changed
+        if amplitude != self.current_amplitude:
+            # Update amplitude
+            if amplitude > 0:
+                amp_cmd = f"aa{amplitude:03d}a\r\n".encode()
+                self.ser.write(amp_cmd)
+                time.sleep(0.001)
+            self.current_amplitude = amplitude
+        
         # Perform measurement
         measurements, error = self.perform_measurement(
-            self.fw, average_count, sample_delay_ms
+            self.fw, amplitude, average_count, sample_delay_ms
         )
         
         if error:

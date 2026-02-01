@@ -32,7 +32,7 @@ class CSVSaver:
                 
                 # Write header
                 header = [
-                    "freq_word", "freq_hz", "Z_mag_avg", "Z_phase_avg_deg",
+                    "freq_word", "freq_hz", "amplitude", "Z_mag_avg", "Z_phase_avg_deg",
                     "measurement_idx", "V_complex_real", "V_complex_imag",
                     "I_complex_real", "I_complex_imag", "A_v", "B_v", "A_i", "B_i",
                     "dc_ch0", "dc_ch1", "rms_residuals_ch0", "rms_residuals_ch1",
@@ -48,9 +48,11 @@ class CSVSaver:
                     Z_phase_avg = freq_data['Z_phase_avg']
                     
                     for measurement in freq_data['measurements']:
+                        amplitude = measurement.get('amplitude', 0)
                         row = [
                             str(freq_word),
                             f"{freq_hz:.6f}",
+                            str(amplitude),
                             f"{Z_mag_avg:.6f}",
                             f"{Z_phase_avg:.6f}",
                             str(measurement['measurement_idx']),
