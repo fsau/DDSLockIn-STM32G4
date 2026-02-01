@@ -5,9 +5,10 @@ Sets up the application, configures theme, and starts the main loop.
 """
 
 import sys
+import signal
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QPalette, QColor
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 import pyqtgraph as pg
 
 from sweep_gui import SweepGUI
@@ -67,16 +68,30 @@ def setup_application():
     
     return app
 
+def signal_handler(sig, frame):
+    """Handle Ctrl+C signal"""
+    print("\nCtrl+C detected. Closing application...")
+    QApplication.quit()
+
 def main():
     """Main application entry point"""
     # Setup application
     app = setup_application()
     
+    # Install signal handler for Ctrl+C
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Create a timer to periodically process Python signals
+    # This allows Ctrl+C to work during the Qt event loop
+    timer = QTimer()
+    timer.start(500)  # Check every 500ms
+    timer.timeout.connect(lambda: None)  # Just to let Python process signals
+    
     # Create and show main window
     main_window = SweepGUI()
     main_window.show()
     
-    # Force layout calculation and redraw - ADD THESE LINES
+    # Force layout calculation and redraw
     QApplication.processEvents()
     main_window.plot_manager.plot_widget.ci.layout.activate()
     main_window.plot_manager.update_views()

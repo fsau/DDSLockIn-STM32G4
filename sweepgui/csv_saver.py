@@ -15,19 +15,25 @@ class CSVSaver:
         
         try:
             with open(filename, 'w', encoding='utf-8') as f:
-                # Write comment with notes and parameters
+                # Write comment with notes and parameters - replace line breaks with spaces
                 notes_text = notes.strip()
                 if notes_text:
+                    # Replace line breaks with spaces for CSV compatibility
+                    notes_text = notes_text.replace('\n', ' ').replace('\r', ' ')
                     f.write(f"# Notes: {notes_text}\n")
+                else:
+                    f.write(f"# No note {notes_text}\n")
                 
                 # Write timestamp
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 f.write(f"# Timestamp: {timestamp}\n")
                 
-                # Write parameters
-                f.write(f"# Parameters:\n")
+                # Write parameters on a single line
+                f.write(f"# Parameters: ")
+                params_list = []
                 for key, value in self.parameters.items():
-                    f.write(f"# {key} = {value}\n")
+                    params_list.append(f"{key}={value}")
+                f.write("; ".join(params_list) + "\n")
                 f.write("\n")
                 
                 # Write header
