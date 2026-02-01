@@ -7,6 +7,9 @@ class PlotManager:
         self.plot_widget = pg.GraphicsLayoutWidget()
         self.setup_plots()
         
+        # Plot dummy data to fix legend colors on startup
+        QtCore.QTimer.singleShot(50, self.plot_dummy_data)
+        
     def setup_plots(self):
         """Setup oscilloscope and analyzer plots"""
         # Oscilloscope plot
@@ -27,7 +30,7 @@ class PlotManager:
         self.plot2.getAxis('left').enableAutoSIPrefix(False)
         
         # Set reasonable default ranges
-        self.plot2.setYRange(4, 8)  # Ω range
+        self.plot2.setYRange(4, 9)  # Ω range
         self.plot2.setXRange(32720, 32800)  # Hz range
         
         # Add right axis for phase
@@ -75,15 +78,81 @@ class PlotManager:
         # Connect plot resize
         self.plot2.sigRangeChanged.connect(self.update_views)
     
+    def plot_dummy_data(self):
+        """Plot dummy data to fix legend colors on startup"""
+        # Plot a single invisible point
+        self.curve_mag.setData([1], [1])
+        self.curve_phase.setData([1], [1])
+        
+        # Clear it immediately
+        self.curve_mag.setData([], [])
+        self.curve_phase.setData([], [])
+    
     def update_views(self):
         """Update phase ViewBox geometry when main plot changes"""
         self.phase_vb.setGeometry(self.plot2.vb.sceneBoundingRect())
         self.phase_vb.linkedViewChanged(self.plot2.vb, self.phase_vb.XAxis)
     
-    def update_oscilloscope(self, t_aligned, ch0, ch1):
-        """Update oscilloscope plot"""
+    def update_oscilloscope(self, t_aligned, ch0, ch1, fit_params=None):
+        """Update oscilloscope plot
+        fit_params: Dictionary with A_v, B_v, C_v, A_i, B_i, C_i from impedance calculator
+        """
+        # Update plots
         self.curve0.setData(t_aligned, ch0)
         self.curve1.setData(t_aligned, ch1)
+        
+        # Calculate Y range based on fitted sine wave parameters
+        if fit_params is not None:
+            # Get fitted parameters
+            A_v = fit_params.get('A_v', 0)
+            B_v = fit_params.get('B_v', 0)
+            C_v = fit_params.get('C_v', 0)
+            A_i = fit_params.get('A_i', 0)
+            B_i = fit_params.get('B_i', 0)
+            C_i = fit_params.get('C_i', 0)
+            
+            # Calculate amplitude for each channel
+            # Signal: A*cos(ωt) + B*sin(ωt) + C
+            # Amplitude = sqrt(A² + B²)
+            amp_v = np.sqrt(A_v**2 + B_v**2)
+            amp_i = np.sqrt(A_i**2 + B_i**2)
+            
+            # Calculate min and max for each channel based on fitted sine wave
+            ch0_min_fit = C_v - amp_v
+            ch0_max_fit = C_v + amp_v
+            ch1_min_fit = C_i - amp_i
+            ch1_max_fit = C_i + amp_i
+            
+            # Get overall range across both channels
+            overall_min = min(ch0_min_fit, ch1_min_fit)
+            overall_max = max(ch0_max_fit, ch1_max_fit)
+            
+            # Add padding
+            padding = max(amp_v, amp_i) * 0.1  # 10% of the larger amplitude
+            y_min = overall_min - padding
+            y_max = overall_max + padding
+            
+            # Set Y range
+            self.plot.setYRange(y_min, y_max, padding=0)
+        else:
+            # Fallback: use data min/max if no fit parameters provided
+            ch0_min = np.min(ch0)
+            ch0_max = np.max(ch0)
+            ch1_min = np.min(ch1)
+            ch1_max = np.max(ch1)
+            
+            overall_min = min(ch0_min, ch1_min)
+            overall_max = max(ch0_max, ch1_max)
+            
+            if overall_min != overall_max:
+                padding = (overall_max - overall_min) * 0.1
+                y_min = overall_min - padding
+                y_max = overall_max + padding
+            else:
+                y_min = overall_min - 0.1
+                y_max = overall_max + 0.1
+            
+            self.plot.setYRange(y_min, y_max, padding=0)
     
     def update_analyzer(self, frequencies, magnitudes, phases):
         """Update impedance analyzer plot"""

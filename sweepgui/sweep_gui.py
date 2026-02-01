@@ -4,7 +4,7 @@ Contains all UI components and business logic.
 """
 
 import numpy as np
-from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QFormLayout
+from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QFormLayout, QApplication
 from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox, QPushButton, QTextEdit, QLineEdit, QLabel, QCheckBox
 from PyQt5.QtCore import QTimer, Qt
 
@@ -29,6 +29,9 @@ class SweepGUI(QMainWindow):
         
         # NEW: Track if we need to insert nan for new sweep in hold mode
         self.insert_nan_next_point = False
+        
+        # NEW: Amplitude control state
+        self.last_amplitude = 100  # Store last amplitude used
         
         # Setup UI
         self.setup_ui()
@@ -89,6 +92,14 @@ class SweepGUI(QMainWindow):
         self.amplitude_box.setValue(100)
         self.amplitude_box.setSuffix(" %")
         
+        # NEW: Automatic amplitude control checkbox
+        self.auto_amplitude_checkbox = QCheckBox()
+        self.auto_amplitude_checkbox.setChecked(False)
+        
+        # # NEW: Auto delay checkbox
+        # self.auto_delay_checkbox = QCheckBox()
+        # self.auto_delay_checkbox.setChecked(False)
+        
         # Calibration controls
         self.r_ref_box = QDoubleSpinBox()
         self.r_ref_box.setRange(0.1, 100000)
@@ -146,8 +157,8 @@ class SweepGUI(QMainWindow):
         # Status display
         self.status = QTextEdit()
         self.status.setReadOnly(True)
-        self.status.setMinimumHeight(110)
-        self.status.setMaximumHeight(110)
+        self.status.setMinimumHeight(120)
+        self.status.setMaximumHeight(120)
         self.status.setText("Idle")
         self.status.setAlignment(Qt.AlignRight)
         
@@ -156,12 +167,14 @@ class SweepGUI(QMainWindow):
         form.addRow("f final:", self.fo_box)
         form.addRow("Δfw per step:", self.delta_fw_box)
         form.addRow("Amplitude:", self.amplitude_box)
+        form.addRow("Auto Amp:", self.auto_amplitude_checkbox)  # NEW: Auto amplitude checkbox
+        # form.addRow("Auto Delay:", self.auto_delay_checkbox)    # NEW: Auto delay checkbox
         form.addRow("R_ref:", self.r_ref_box)
         form.addRow("C_ref:", self.c_ref_box)
         form.addRow("Sample Rate:", self.sample_rate_box)
         form.addRow("Start Delay", self.start_delay_box)
         form.addRow("Sample Delay", self.sample_delay_box)
-        form.addRow("Average Count:", self.average_count_box)
+        form.addRow("Samples Average:", self.average_count_box)
         form.addRow("Hold Plot:", self.hold_plot_checkbox)
         form.addRow(self.start_btn)
         form.addRow(self.stop_btn)
@@ -199,7 +212,156 @@ class SweepGUI(QMainWindow):
         self.filename_edit.blockSignals(True)
         self.filename_edit.setText(new_filename)
         self.filename_edit.blockSignals(False)
+    
+    def calculate_optimal_amplitude(self, amplitude, max_amplitude, A_v, B_v, A_i, B_i):
+        """
+        Calculate optimal amplitude based on fitted amplitudes.
+        Returns new amplitude value (0-100) and True if amplitude was adjusted.
+        """
+        # Calculate fitted amplitudes for both channels
+        amp_v = np.sqrt(A_v**2 + B_v**2)
+        amp_i = np.sqrt(A_i**2 + B_i**2)
         
+        # Target range for optimal measurement (volts)
+        MIN_TARGET_AMPLITUDE = 0.3  # V - minimum for good SNR
+        MAX_ALLOWED_AMPLITUDE = 0.8  # V - maximum to avoid clipping (with margin)
+        
+        # Get the larger of the two amplitudes (worst case for clipping)
+        max_measured_amp = max(amp_v, amp_i)
+        
+        if max_measured_amp > 0:
+            # Check if amplitude is TOO HIGH (risk of clipping)
+            if max_measured_amp > MAX_ALLOWED_AMPLITUDE:
+                # Reduce amplitude proportionally to bring it to MAX_ALLOWED_AMPLITUDE
+                scale_factor = MAX_ALLOWED_AMPLITUDE / max_measured_amp
+                new_amp = max(1, int(amplitude * scale_factor))
+                return new_amp, True
+            
+            # Check if amplitude is TOO LOW (poor SNR)
+            elif max_measured_amp < MIN_TARGET_AMPLITUDE and amplitude < max_amplitude:
+                # Increase amplitude proportionally to bring it to MIN_TARGET_AMPLITUDE
+                scale_factor = MIN_TARGET_AMPLITUDE / max_measured_amp
+                # Increase amplitude, but not above max_amplitude
+                new_amp = min(max_amplitude, int(amplitude * scale_factor))
+                # Cap increase to avoid overshoot (max 200% increase per step)
+                if new_amp > amplitude * 2.0:
+                    new_amp = int(amplitude * 2.0)
+                return new_amp, True
+        
+        return amplitude, False
+    
+    def check_stability(self, measurements, current_amplitude=None):
+        """Check if measurements are stable with amplitude-based adaptive threshold"""
+        if not measurements or len(measurements) < 3:
+            return False
+        
+        sample_rate = self.sample_rate_box.value() * 1000
+        impedance_readings = []
+        
+        for measurement in measurements:
+            ch0 = measurement['ch0']
+            ch1 = measurement['ch1']
+            freq_hz = measurement['freq_hz']
+            
+            # Calculate impedance
+            (Z_mag, Z_phase, _, _, _, _, _, _, _, _, _, _, _, _) = \
+                self.impedance_calculator.calculate_impedance_lsq(
+                    ch0, ch1, freq_hz, sample_rate
+                )
+            
+            if Z_mag > 0 and np.isfinite(Z_mag):
+                impedance_readings.append(Z_mag)
+        
+        if len(impedance_readings) < 3:
+            return False
+        
+        # Get last 3 measurements
+        last_three = impedance_readings[-3:]
+        
+        # Calculate variation
+        max_val = max(last_three)
+        min_val = min(last_three)
+        
+        if max_val <= 0:
+            return False
+        
+        variation = (max_val - min_val) / max_val
+        
+        # Adaptive threshold based on amplitude
+        # When amplitude is low, signal is weak → be more tolerant (higher threshold)
+        # When amplitude is high, signal is strong → be stricter (lower threshold)
+        if current_amplitude is None:
+            current_amplitude = 100  # Default to max if not provided
+        
+        if current_amplitude < 10:  # < 10% amplitude - very weak signal
+            threshold = 0.20  # 20% variation allowed
+        elif current_amplitude < 20:  # < 20% amplitude - weak signal
+            threshold = 0.15  # 15% variation allowed
+        elif current_amplitude < 50:  # < 50% amplitude - moderate signal
+            threshold = 0.10  # 10% variation allowed
+        elif current_amplitude < 80:  # < 80% amplitude - good signal
+            threshold = 0.07  # 7% variation allowed
+        else:  # 80-100% amplitude - excellent signal
+            threshold = 0.05  # 5% variation allowed
+        
+        # Also consider the impedance magnitude itself
+        # For very low impedances, be even more tolerant
+        avg_impedance = np.mean(last_three)
+        if avg_impedance < 1:  # < 1Ω
+            threshold = max(threshold, 0.25)  # At least 25% tolerance
+        elif avg_impedance < 10:  # < 10Ω
+            threshold = max(threshold, 0.20)  # At least 20% tolerance
+        elif avg_impedance < 100:  # < 100Ω
+            threshold = max(threshold, 0.15)  # At least 15% tolerance
+        
+        return variation < threshold
+    
+    def perform_measurement_with_auto_delay(self, fw, amplitude, average_count):
+        """Perform measurement with automatic delay until stable"""
+        max_retries = 10
+        base_delay = self.sample_delay_box.value()
+        min_measurements_for_check = max(3, average_count)
+        
+        all_measurements = []
+        
+        for retry in range(max_retries):
+            current_delay = base_delay + (retry * 100)  # Increase delay by 100ms each retry
+            
+            # Perform measurements
+            measurements, error = self.serial_sweep.perform_measurement(
+                fw, amplitude, min_measurements_for_check, current_delay
+            )
+            
+            if error:
+                return measurements, error
+            
+            # Add to all measurements
+            all_measurements.extend(measurements)
+            
+            # Check if we have enough measurements to assess stability
+            if len(all_measurements) >= 3:
+                # Check stability with amplitude-aware adaptive threshold
+                if self.check_stability(all_measurements, amplitude):
+                    # Stable! Return only the requested number of measurements
+                    # Use the most recent measurements
+                    if len(all_measurements) > average_count:
+                        return all_measurements[-average_count:], None
+                    else:
+                        return all_measurements, None
+            
+            # Update status without freezing
+            if retry > 0:
+                self.status.setText(f"Auto delay: retry {retry}, delay: {current_delay}ms")
+                # Process events to update UI but don't sleep
+                QApplication.processEvents()
+        
+        # If we get here, we've used all retries
+        # Return the most recent measurements anyway
+        if len(all_measurements) > average_count:
+            return all_measurements[-average_count:], None
+        else:
+            return all_measurements, None
+    
     def start_sweep(self):
         """Start the frequency sweep"""
         fi = self.fi_box.value()
@@ -238,6 +400,9 @@ class SweepGUI(QMainWindow):
             # Set flag to insert nan before first point of new sweep
             self.insert_nan_next_point = True
             # Don't clear the plot
+        
+        # Reset amplitude control state
+        self.last_amplitude = amplitude
         
         # Set plot range
         self.plot_manager.set_xrange(fi, fo)
@@ -290,6 +455,9 @@ class SweepGUI(QMainWindow):
         
         sample_rate = self.sample_rate_box.value() * 1000
         
+        # Store the last fitted parameters for amplitude control
+        last_A_v, last_B_v, last_A_i, last_B_i = 0, 0, 0, 0
+        
         for measurement in measurements:
             ch0 = measurement['ch0']
             ch1 = measurement['ch1']
@@ -301,6 +469,9 @@ class SweepGUI(QMainWindow):
                 self.impedance_calculator.calculate_impedance_lsq(
                     ch0, ch1, freq_hz, sample_rate
                 )
+            
+            # Store fitted parameters from last measurement
+            last_A_v, last_B_v, last_A_i, last_B_i = A_v, B_v, A_i, B_i
             
             # Store for averaging
             if Z_mag > 0 and np.isfinite(Z_mag) and np.isfinite(Z_phase):
@@ -330,11 +501,6 @@ class SweepGUI(QMainWindow):
                 'voltage_phase_rad': voltage_phase
             }
             freq_detailed_data.append(measurement_data)
-            
-            # Update status during averaging
-            if self.average_count_box.value() > 1:
-                status_text = f"f = {freq_hz:.1f} Hz\nAvg {measurement['measurement_idx']+1}/{self.average_count_box.value()}"
-                self.status.setText(status_text)
         
         # Calculate averages
         if all_mag_measurements:
@@ -344,6 +510,23 @@ class SweepGUI(QMainWindow):
             avg_mag = 0
             avg_phase = 0
         
+        # NEW: Automatic amplitude control
+        current_amplitude = measurements[-1]['amplitude'] if measurements else self.amplitude_box.value()
+        max_amplitude = self.amplitude_box.value()  # User's maximum allowed amplitude
+        
+        if self.auto_amplitude_checkbox.isChecked() and measurements:
+            # Calculate optimal amplitude based on last measurement
+            optimal_amp, amp_adjusted = self.calculate_optimal_amplitude(
+                current_amplitude, max_amplitude,
+                last_A_v, last_B_v, last_A_i, last_B_i
+            )
+            
+            if amp_adjusted and optimal_amp != current_amplitude:
+                # Store new amplitude for next step
+                self.last_amplitude = optimal_amp
+                # Update the current amplitude in serial_sweep for next step
+                self.serial_sweep.current_amplitude = optimal_amp
+        
         # Update oscilloscope plot with last measurement
         if measurements:
             last_measurement = measurements[-1]
@@ -352,7 +535,7 @@ class SweepGUI(QMainWindow):
             freq_hz = last_measurement['freq_hz']
             
             # Get voltage phase from last calculation
-            (_, _, voltage_phase, _, _, _, _, _, _, _, _, _, _) = \
+            (_, _, voltage_phase, _, _, C_v, C_i, A_v, B_v, A_i, B_i, _, _) = \
                 self.impedance_calculator.calculate_impedance_lsq(
                     ch0, ch1, freq_hz, sample_rate
                 )
@@ -367,7 +550,13 @@ class SweepGUI(QMainWindow):
                 t_offset = 0
             
             t_aligned = t + t_offset - 2e6/(freq_hz)
-            self.plot_manager.update_oscilloscope(t_aligned, ch0, ch1)
+            
+            # Pass fit parameters to plot manager
+            fit_params = {
+                'A_v': A_v, 'B_v': B_v, 'C_v': C_v,
+                'A_i': A_i, 'B_i': B_i, 'C_i': C_i
+            }
+            self.plot_manager.update_oscilloscope(t_aligned, ch0, ch1, fit_params)
             
             # Set x-range for oscilloscope
             if freq_hz > 0:
@@ -400,9 +589,20 @@ class SweepGUI(QMainWindow):
         z_display = format_impedance(avg_mag)
         
         avg_count = self.average_count_box.value()
+        
+        # Calculate signal amplitudes for status display
+        amp_v = np.sqrt(last_A_v**2 + last_B_v**2)
+        amp_i = np.sqrt(last_A_i**2 + last_B_i**2)
+        
+        # Include amplitude info in status if auto amplitude is enabled
+        amp_info = ""
+        if self.auto_amplitude_checkbox.isChecked():
+            amp_info = f"Amp: {current_amplitude}% (V={amp_v*1000:.0f}mV, I={amp_i*1000:.0f}mV)\n"
+        
         if avg_count > 1:
             status_text = (
                 f"f = {freq_display}\n"
+                f"{amp_info}"
                 f"|Z| = {z_display} (avg of {len(all_mag_measurements)})\n"
                 f"φ = {avg_phase:.1f}°\n"
                 f"Residuals: V={rms_residuals_ch0*1e3:.2f}mV, I={rms_residuals_ch1*1e3:.2f}mV\n"
@@ -411,6 +611,7 @@ class SweepGUI(QMainWindow):
         else:
             status_text = (
                 f"f = {freq_display}\n"
+                f"{amp_info}"
                 f"|Z| = {z_display}\n"
                 f"φ = {avg_phase:.1f}°\n"
                 f"Residuals: V={rms_residuals_ch0*1e3:.2f}mV, I={rms_residuals_ch1*1e3:.2f}mV\n"
@@ -442,12 +643,57 @@ class SweepGUI(QMainWindow):
         self.generate_new_filename()
     
     def sweep_step(self):
-        """Execute one sweep step"""
+        """Execute one sweep step - read ALL parameters in real-time"""
+        # Read ALL parameters in real-time
         delta_fw = self.delta_fw_box.value()
         amplitude = self.amplitude_box.value()
         average_count = self.average_count_box.value()
         sample_delay_ms = self.sample_delay_box.value()
         
+        # Update impedance calculator with current values
+        self.impedance_calculator = ImpedanceCalculator(
+            self.r_ref_box.value(),
+            self.c_ref_box.value()
+        )
+        
+        # NEW: Use auto-adjusted amplitude if enabled
+        if self.auto_amplitude_checkbox.isChecked():
+            amplitude = self.last_amplitude
+        
+        # # NEW: If auto delay is enabled, we need to override the normal sweep step
+        # if self.auto_delay_checkbox.isChecked():
+        #     if not self.serial_sweep.sweep_started or self.serial_sweep.waiting_for_start:
+        #         return
+            
+        #     if self.serial_sweep.fw > self.serial_sweep.fw_end:
+        #         self.serial_sweep.sweep_started = False
+        #         if self.serial_sweep.on_sweep_complete:
+        #             self.serial_sweep.on_sweep_complete()
+        #         return
+            
+        #     # Perform measurement with auto delay
+        #     measurements, error = self.perform_measurement_with_auto_delay(
+        #         self.serial_sweep.fw, amplitude, average_count
+        #     )
+            
+        #     if error:
+        #         self.serial_sweep.sweep_started = False
+        #         self.timer.stop()
+        #         self.status.setText(error)
+        #         return
+            
+        #     # Call sweep step callback
+        #     if self.serial_sweep.on_sweep_step:
+        #         result = self.serial_sweep.on_sweep_step(measurements, self.serial_sweep.fw)
+        #         if result:
+        #             # Only store detailed data for CSV
+        #             self.serial_sweep.detailed_data.append(result['detailed_data'])
+            
+        #     # Increment frequency
+        #     self.serial_sweep.fw += delta_fw
+        # else:
+
+        # Original sweep step logic
         continue_sweep, error = self.serial_sweep.sweep_step(
             delta_fw, amplitude, average_count, sample_delay_ms
         )
@@ -468,6 +714,8 @@ class SweepGUI(QMainWindow):
             'fo': self.fo_box.value(),
             'delta_fw': self.delta_fw_box.value(),
             'Amplitude': f"{self.amplitude_box.value()}%",
+            'Auto_amplitude': 'Yes' if self.auto_amplitude_checkbox.isChecked() else 'No',
+            # 'Auto_delay': 'Yes' if self.auto_delay_checkbox.isChecked() else 'No',
             'R_ref': self.r_ref_box.value(),
             'C_ref': self.c_ref_box.value(),
             'Sample rate': self.sample_rate_box.value(),
