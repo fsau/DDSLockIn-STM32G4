@@ -6,6 +6,7 @@ import serial.tools.list_ports
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtWidgets, QtCore
 from scipy import optimize  # For least squares
+from PyQt5.QtCore import Qt
 
 # ------------------------------------------------------------
 # Same helper as Octave
@@ -46,7 +47,7 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.plot = self.plot_widget.addPlot(title="Oscilloscope")
         self.plot.showGrid(x=True, y=True)
         self.plot.setLabel('left', 'Amplitude', units='V')
-        self.plot.setLabel('bottom', 'Time', units='us')
+        self.plot.setLabel('bottom', 'Time', units='μs')
         self.plot.getAxis('bottom').enableAutoSIPrefix(False)
         
         self.plot_widget.nextRow()
@@ -62,7 +63,7 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.plot2.getAxis('left').enableAutoSIPrefix(False)
         
         # Set reasonable default ranges
-        self.plot2.setYRange(2, 8)  # Ω range
+        self.plot2.setYRange(4, 8)  # Ω range
         self.plot2.setXRange(32720, 32800)  # Hz range
         
         # Add right axis for phase using ViewBox method
@@ -114,18 +115,24 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.fo_box.setRange(1, 1_000_000)
         self.fo_box.setValue(32800)
         
+        # Delta fw per step (integer input)
+        self.delta_fw_label = QtWidgets.QLabel("Δfw per step:")
+        self.delta_fw_box = QtWidgets.QSpinBox()
+        self.delta_fw_box.setRange(1, 1000)
+        self.delta_fw_box.setValue(1)
+        
         # Feedback resistor value (for calibration)
         self.r_ref_label = QtWidgets.QLabel("R_ref (kΩ):")
         self.r_ref_box = QtWidgets.QDoubleSpinBox()
         self.r_ref_box.setRange(0.1, 100000)
-        self.r_ref_box.setValue(1500.0)
+        self.r_ref_box.setValue(2000.0)
         self.r_ref_box.setDecimals(1)
 
         # Feedback capacitance field
         self.c_ref_label = QtWidgets.QLabel("C_ref (pF):")
         self.c_ref_box = QtWidgets.QDoubleSpinBox()
         self.c_ref_box.setRange(0.1, 10000)
-        self.c_ref_box.setValue(10.0)  # Default 100 pF
+        self.c_ref_box.setValue(10.5)  # Default 100 pF
         self.c_ref_box.setDecimals(1)
 
         # Sampling parameters
@@ -158,7 +165,17 @@ class SweepGUI(QtWidgets.QMainWindow):
         self.start_btn = QtWidgets.QPushButton("Start / Update")
         self.stop_btn = QtWidgets.QPushButton("Stop")
         self.clear_btn = QtWidgets.QPushButton("Clear Data")
-        self.status = QtWidgets.QLabel("Idle")
+        
+        # Create a text edit widget for multi-line status with right alignment
+        self.status = QtWidgets.QTextEdit()
+        self.status.setReadOnly(True)
+        self.status.setMaximumHeight(100)  # Limit height to prevent it from taking too much space
+        self.status.setText("Idle")
+        
+        # Set right alignment
+        alignment = self.status.alignment()
+        # self.status.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.status.setAlignment(alignment)
         
         # Legend
         self.legend = pg.LegendItem(offset=(70, 30))
@@ -168,6 +185,7 @@ class SweepGUI(QtWidgets.QMainWindow):
 
         form.addRow("fi [Hz]:", self.fi_box)
         form.addRow("fo [Hz]:", self.fo_box)
+        form.addRow(self.delta_fw_label, self.delta_fw_box)  # Added delta fw
         form.addRow(self.r_ref_label, self.r_ref_box)
         form.addRow(self.c_ref_label, self.c_ref_box)  # Added capacitance field
         form.addRow(self.sample_rate_label, self.sample_rate_box)
@@ -177,7 +195,10 @@ class SweepGUI(QtWidgets.QMainWindow):
         form.addRow(self.start_btn)
         form.addRow(self.stop_btn)
         form.addRow(self.clear_btn)
-        form.addRow("Status:", self.status)
+        spacer = QtWidgets.QSpacerItem(20, 40)
+        form.addItem(spacer)
+        # form.addRow(QtWidgets.QLabel("Status:"))
+        form.addRow(self.status)
 
         # ---------------- Sweep state ----------------
         self.timer = QtCore.QTimer()
@@ -289,7 +310,8 @@ class SweepGUI(QtWidgets.QMainWindow):
         So: Z_dut = V_dut / I_ref
         Where I_ref is complex current from CH1
         
-        Returns: impedance magnitude, phase (degrees), and phase of voltage channel for time alignment
+        Returns: impedance magnitude, phase (degrees), phase of voltage channel for time alignment,
+                 residuals for both channels, and DC levels
         """
         R_ref = self.r_ref_box.value() * 1e3;
         C_ref = self.c_ref_box.value() * 1e-12  # Convert pF to F
@@ -311,11 +333,11 @@ class SweepGUI(QtWidgets.QMainWindow):
         ])
         
         # Fit ch0 (V_dut - voltage across DUT)
-        coeffs_ch0, *_ = np.linalg.lstsq(X, ch0, rcond=None)
+        coeffs_ch0, residuals_ch0, *_ = np.linalg.lstsq(X, ch0, rcond=None)
         A_v, B_v, C_v = coeffs_ch0
         
         # Fit ch1 (I_ref - current through reference)
-        coeffs_ch1, *_ = np.linalg.lstsq(X, ch1, rcond=None)
+        coeffs_ch1, residuals_ch1, *_ = np.linalg.lstsq(X, ch1, rcond=None)
         A_i, B_i, C_i = coeffs_ch1
         
         # Convert to complex amplitude
@@ -363,7 +385,18 @@ class SweepGUI(QtWidgets.QMainWindow):
         while Z_phase < -180:
             Z_phase += 360
         
-        return Z_mag, Z_phase, voltage_phase
+        # Calculate RMS of residuals
+        if len(residuals_ch0) > 0:
+            rms_residuals_ch0 = np.sqrt(residuals_ch0[0] / n_samples)
+        else:
+            rms_residuals_ch0 = 0
+            
+        if len(residuals_ch1) > 0:
+            rms_residuals_ch1 = np.sqrt(residuals_ch1[0] / n_samples)
+        else:
+            rms_residuals_ch1 = 0
+        
+        return Z_mag, Z_phase, voltage_phase, rms_residuals_ch0, rms_residuals_ch1, C_v, C_i
 
     # --------------------------------------------------------
     def sweep_step(self):
@@ -391,6 +424,10 @@ class SweepGUI(QtWidgets.QMainWindow):
         last_ch1 = None
         last_freq_hz = None
         last_voltage_phase = 0
+        last_rms_residuals_ch0 = 0
+        last_rms_residuals_ch1 = 0
+        last_dc_ch0 = 0
+        last_dc_ch1 = 0
         
         # Perform multiple measurements at this frequency
         for measurement_idx in range(average_count):
@@ -440,8 +477,12 @@ class SweepGUI(QtWidgets.QMainWindow):
             last_freq_hz = freq_hz
             
             # ----- calculate impedance using least squares -----
-            Z_mag, Z_phase, voltage_phase = self.calculate_impedance_lsq(ch0, ch1, freq_hz)
+            Z_mag, Z_phase, voltage_phase, rms_residuals_ch0, rms_residuals_ch1, dc_ch0, dc_ch1 = self.calculate_impedance_lsq(ch0, ch1, freq_hz)
             last_voltage_phase = voltage_phase  # Store phase for time alignment
+            last_rms_residuals_ch0 = rms_residuals_ch0
+            last_rms_residuals_ch1 = rms_residuals_ch1
+            last_dc_ch0 = dc_ch0
+            last_dc_ch1 = dc_ch1
             
             # Store this measurement for averaging
             if Z_mag > 0 and np.isfinite(Z_mag) and np.isfinite(Z_phase):
@@ -450,7 +491,8 @@ class SweepGUI(QtWidgets.QMainWindow):
                 
             # Update status during averaging
             if average_count > 1:
-                self.status.setText(f"f = {freq_hz:.1f} Hz, Avg {measurement_idx+1}/{average_count}")
+                status_text = f"f = {freq_hz:.1f} Hz\nAvg {measurement_idx+1}/{average_count}"
+                self.status.setText(status_text)
         
         # Calculate average of all valid measurements
         if all_mag_measurements:
@@ -507,13 +549,29 @@ class SweepGUI(QtWidgets.QMainWindow):
                 self.curve_mag.setData(freqs_np[valid_idx], mags_np[valid_idx])
                 self.curve_phase.setData(freqs_np[valid_idx], phases_np[valid_idx])
         
-        # Update status with averaged result
+        # Update status with detailed information
         if average_count > 1:
-            self.status.setText(f"f = {freq_hz:.1f} Hz, |Z| = {avg_mag:.2f} Ω (avg of {len(all_mag_measurements)}), φ = {avg_phase:.1f}°")
+            status_text = (
+                f"f = {freq_hz:.1f} Hz\n"
+                f"|Z| = {avg_mag:.2f} Ω (avg of {len(all_mag_measurements)})\n"
+                f"φ = {avg_phase:.1f}°\n"
+                f"Residuals: V={last_rms_residuals_ch0*1e3:.2f}mV, I={last_rms_residuals_ch1*1e3:.2f}mV\n"
+                f"DC: V={last_dc_ch0*1e3:.1f}mV, I={last_dc_ch1*1e3:.1f}mV"
+            )
         else:
-            self.status.setText(f"f = {freq_hz:.1f} Hz, |Z| = {avg_mag:.2f} Ω, φ = {avg_phase:.1f}°")
+            status_text = (
+                f"f = {freq_hz:.1f} Hz\n"
+                f"|Z| = {avg_mag:.2f} Ω\n"
+                f"φ = {avg_phase:.1f}°\n"
+                f"Residuals: V={last_rms_residuals_ch0*1e3:.2f}mV, I={last_rms_residuals_ch1*1e3:.2f}mV\n"
+                f"DC: V={last_dc_ch0*1e3:.1f}mV, I={last_dc_ch1*1e3:.1f}mV"
+            )
+        
+        self.status.setText(status_text)
 
-        self.fw += 1
+        # Increment fw by delta_fw instead of 1
+        delta_fw = self.delta_fw_box.value()
+        self.fw += delta_fw
 
 
 # ------------------------------------------------------------

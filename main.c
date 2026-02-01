@@ -47,6 +47,70 @@ void bp_here(void) {__asm__ volatile ("bkpt #0");;}
 
 uint16_t ch0[ADC_BUF_LEN], ch1[ADC_BUF_LEN];
 
+uint8_t dpot_pos = 0;
+
+void dpot_init(void)
+{
+    // Initialize UD (direction) pin
+    gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
+    gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO10);
+    
+    // Initialize INC (increment) pin  
+    gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
+    gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO11);
+
+    // Set direction to increase
+    gpio_set(GPIOC, GPIO10);
+    for(int j = 0; j < 1000; j++) __asm__("nop");
+    
+    // Move to maximum position (100)
+    for(uint8_t i = 0; i < 100; i++)
+    {
+        gpio_clear(GPIOC, GPIO11);
+        for(int j = 0; j < 1000; j++) __asm__("nop");
+        gpio_set(GPIOC, GPIO11);
+        for(int j = 0; j < 1000; j++) __asm__("nop");
+    }
+    
+    dpot_pos = 100;
+    gpio_clear(GPIOC, GPIO10); // Set direction back to default (decrease)
+}
+
+void dpot_set(uint8_t new_pos)
+{
+    if(new_pos > dpot_pos) {
+        // Need to increase
+        gpio_set(GPIOC, GPIO10); // Set direction to increase
+        for(int j = 0; j < 10000; j++) __asm__("nop");
+        
+        uint8_t steps = new_pos - dpot_pos;
+        for(uint8_t i = 0; i < steps; i++) {
+            gpio_clear(GPIOC, GPIO11);
+            for(int j = 0; j < 10000; j++) __asm__("nop");
+            gpio_set(GPIOC, GPIO11);
+            for(int j = 0; j < 10000; j++) __asm__("nop");
+        }
+        
+        gpio_clear(GPIOC, GPIO10); // Reset direction
+    } 
+    else if(new_pos < dpot_pos) {
+        // Need to decrease
+        gpio_clear(GPIOC, GPIO10); // Set direction to decrease
+        for(int j = 0; j < 10000; j++) __asm__("nop");
+        
+        uint8_t steps = dpot_pos - new_pos;
+        for(uint8_t i = 0; i < steps; i++) {
+            gpio_clear(GPIOC, GPIO11);
+            for(int j = 0; j < 10000; j++) __asm__("nop");
+            gpio_set(GPIOC, GPIO11);
+            for(int j = 0; j < 10000; j++) __asm__("nop");
+        }
+    }
+    // If equal, do nothing
+    
+    dpot_pos = new_pos;
+}
+
 int main(void)
 {
     struct rcc_clock_scale pllconfig = rcc_hse_8mhz_3v3[RCC_CLOCK_3V3_170MHZ];
@@ -67,6 +131,7 @@ int main(void)
     adc_timer_trigger_init();
     spi_setup();
     ad9833_init();
+    dpot_init();
 
 	while (1) {
         uint8_t buf[64];
@@ -114,6 +179,12 @@ int main(void)
             {
                 freq_status = 1;
                 freqw_buf = 0;
+            }
+            else if (buf[i] == 'A' || buf[i] == 'a')
+            {
+                static uint8_t pos = 0;
+                pos = (pos+1)%100;
+                dpot_set(pos);
             }
         }
 
