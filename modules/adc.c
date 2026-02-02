@@ -2,7 +2,6 @@
 #include <libopencm3/stm32/adc.h>
 #include <libopencm3/stm32/dma.h>
 #include <libopencm3/stm32/dmamux.h>
-#include <libopencm3/stm32/timer.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/gpio.h>
 
@@ -117,6 +116,12 @@ void adc_dual_dma_init(void) {
     
     /*  Enable DMA channel */
     // dma_enable_channel(DMA1, DMA_CHANNEL1);
+
+    /* ADC setup */
+    ADC_CFGR1(ADC1) &= ~ADC_CFGR1_CONT; // disable continuous mode
+
+    adc_enable_external_trigger_regular(ADC1,
+        ADC12_CFGR1_EXTSEL_TIM6_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
 }
 
 void adc_capture_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
@@ -168,34 +173,6 @@ void adc_capture_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
         adc1_data[i] = (uint16_t)(packed & 0xFFFF);
         adc2_data[i] = (uint16_t)(packed >> 16);   
     }
-}
-
-void adc_timer_trigger_init(void)
-{
-    /* Enable clocks */
-    rcc_periph_clock_enable(RCC_TIM6);
-    rcc_periph_clock_enable(RCC_ADC12);
-
-    /* Timer setup */
-    uint32_t timer_clk = 80000000; // APB2 timer clock
-    uint32_t adc_rate = 1000000;   // 1 MSa/s
-    uint32_t prescaler = 0;        // no prescaler
-    uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
-
-    timer_set_prescaler(TIM6, prescaler);
-    timer_set_period(TIM6, arr);
-
-    /* TRGO on update event */
-    timer_set_master_mode(TIM6, TIM_CR2_MMS_UPDATE);
-
-    /* Enable counter */
-    timer_enable_counter(TIM6);
-
-    /* ADC setup */
-    ADC_CFGR1(ADC1) &= ~ADC_CFGR1_CONT; // disable continuous mode
-
-    adc_enable_external_trigger_regular(ADC1,
-        ADC12_CFGR1_EXTSEL_TIM6_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
 }
 
 void adc_capture_buffer_no_dma(uint16_t *adc1_data, uint16_t *adc2_data, uint32_t num_samples) {
@@ -270,8 +247,8 @@ void adc_stop_continuous_mode(void) {
 }
 
 void dma1_channel1_isr(void) {
-    if (dma_get_interrupt_flag(DMA1, DMA_CHANNEL1, DMA_TCIF)) {
-        dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_TCIF);
+    if (dma_get_interrupt_flag(DMA1, DMA_CHANNEL1, DMA_GIF)) {
+        dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_GIF);
         adc_capture_complete = 1;
     }
 }
