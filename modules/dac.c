@@ -43,6 +43,7 @@ void dac_init(void)
     dac_trigger_enable(DAC_INSTANCE, DAC_CHANNEL);
     dac_set_trigger_source(DAC_INSTANCE, DAC_CR_TSEL1_T3);
     dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL);
+    dac_set_mode(DAC1, DAC_MCR_SINFORMAT1);
     
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
 }

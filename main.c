@@ -128,7 +128,7 @@ void timers_trigger_init(void)
 
     /* Timer setup */
     uint32_t timer_clk = 170000000; // APB2 timer clock
-    uint32_t adc_rate = 1000000;   // 1 MSa/s
+    uint32_t adc_rate = 2000000;   // 1 MSa/s
     uint32_t prescaler = 0;        // no prescaler
     uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
 
@@ -191,22 +191,21 @@ int main(void)
     cordic_init();
     dac_init();
 
-   for(uint32_t i = 0; i < 100; i++)
+   for(uint32_t i = 0; i < 33; i++)
     {
-        angles[i] = ((uint32_t)0x7FFF<<16) + (i * 0xFFFF) / 100; // Full scale angles
+        angles[i] = ((uint32_t)0x6A00<<16) + (i * 0xFFFF) / 33; // Full scale angles
     }
-    cordic_start_dma(angles, results, 100);
+    cordic_start_dma(angles, results, 33);
 
     for(uint32_t i = 0; i < 1000000; i+=1) __asm__("nop");
 
-   for(uint32_t i = 0; i < 100; i++)
+   for(uint32_t i = 0; i < 33; i++)
     {
         results[i] &= 0xFFFF; 
-        results[i] = ((int16_t)results[i])/32+0x800; // Shift to unsigned
-        results[i] %= 4096;
+        results[i] = ((int16_t)results[i])/16; // Shift to unsigned
     }
 
-    dac_start((uint16_t*) results, 100);
+    dac_start((uint16_t*) results, 33);
 
     for(uint32_t i = 0; i < 1000000; i+=1) __asm__("nop");
 

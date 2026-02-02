@@ -1,14 +1,32 @@
-# STM32F103 (Bluepill) Blink Template
+# STM32G431 Spec Analyzer
 
-## Importing `libopencm3`
+A small firmware and toolset for generating and analyzing frequency sweeps on an STM32G431 "blackpill" board.
 
-Run:
+Contents
+- `main.c` — firmware entry point
+- `modules/` — firmware modules (AD9833 driver, ADC, DAC, SPI, USB serial, utilities)
+- `libopencm3/` — libopencm3 firmware library (submodule)
+- `sweepgui/` — Python GUI and helper scripts for running and saving sweeps
 
-```
-git submodule add https://github.com/libopencm3/libopencm3.git
-git submodule update --init --recursive
-```
+Requirements
+- ARM embedded toolchain (e.g. `arm-none-eabi-gcc`)
+- `make`
+- `libopencm3` checked out as a submodule
+- Python 3 for the GUI (`python3 sweepgui/app.py`) and Octave for `getspec.m` if you use the analysis scripts
 
-## Building:
+Build
+- Initialize libopencm3 (if not already):
 
-`make -B -o libopencm3` for unconditionally (re)compiling everything but libopencm3, otherwise just run `make`.
+  git submodule update --init --recursive
+
+- Build firmware:
+
+  make
+
+- Build outputs appear in `build/` (ELF, disassembly, size, etc.)
+
+Flash
+- Use your preferred SWD/flashing tool (for example `st-flash` or OpenOCD) to program the generated ELF/bin.
+
+Notes
+- This repository contains firmware sources and desktop tools intended for development and measurement. Adjust flashing and build steps to match your hardware and toolchain.
