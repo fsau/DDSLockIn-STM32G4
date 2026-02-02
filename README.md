@@ -1,6 +1,6 @@
-# STM32G431 Spec Analyzer
+# STM32G431 Impedance Analyzer
 
-A small firmware and toolset for generating and analyzing frequency sweeps on an STM32G431 "blackpill" board.
+A small firmware and toolset for generating and analyzing frequency sweeps on an STM32G431 "blackpill" board using its dual 4MSa/s ADC, DAC etc.
 
 Contents
 - `main.c` — firmware entry point
@@ -30,6 +30,9 @@ Flash
 
 Notes
 - This repository contains firmware sources and desktop tools intended for development and measurement. Adjust flashing and build steps to match your hardware and toolchain.
+
+Todo
+- Quite a lot of things: DAC waveform generation (currently uses a AD9833 DDS frequency generator), run the lockin detection/quadrature demodulation in STM32 instead of in the app/GUI, and apply an onboard PLL loop for resonance measurements.
 
 GUI Screenshot
 
