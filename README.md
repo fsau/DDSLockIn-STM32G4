@@ -26,7 +26,13 @@ Build
 - Build outputs appear in `build/` (ELF, disassembly, size, etc.)
 
 Flash
-- Use your preferred SWD/flashing tool (for example `st-flash` or OpenOCD) to program the generated ELF/bin.
+- Use your preferred SWD/flashing tool (for example `st-flash` or DFU) to program the generated ELF/bin.
 
 Notes
 - This repository contains firmware sources and desktop tools intended for development and measurement. Adjust flashing and build steps to match your hardware and toolchain.
+
+GUI Screenshot
+
+![GUI Screenshot](docs/screenshot.png)
+
+

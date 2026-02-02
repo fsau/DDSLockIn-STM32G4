@@ -4,9 +4,11 @@
 .vscode/
 build/
 build*/
-docs/
+# docs/
 *octave-workspace*
 *.csv
+.*
+*/old/*
 
 # Python:
 

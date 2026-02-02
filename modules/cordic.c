@@ -25,7 +25,13 @@ void cordic_init(void)
     rcc_periph_clock_enable(RCC_DMAMUX1);
     rcc_periph_clock_enable(RCC_DMA1);
 
-    /* Basic cordic configuration left to start-time; nothing else here */
+    /* configure CORDIC for 16-bit argument/result (returns packed 32-bit results) */
+    cordic_set_function(CORDIC_CSR_FUNC_COS);
+    cordic_set_precision(CORDIC_CSR_PRECISION_ITER_20);
+    cordic_set_argument_width_16bit();
+    cordic_set_result_width_16bit();
+    cordic_set_number_of_arguments_1();
+    cordic_set_number_of_results_1(); /* one 32-bit read contains two 16-bit results */
 }
 
 int cordic_start_dma(volatile uint32_t *write_buf32, volatile uint32_t *read_buf32, size_t len)
@@ -34,14 +40,6 @@ int cordic_start_dma(volatile uint32_t *write_buf32, volatile uint32_t *read_buf
         return -1;
     if (transfer_in_progress)
         return -2; /* busy */
-
-    /* configure CORDIC for 16-bit argument/result (returns packed 32-bit results) */
-    cordic_set_function(CORDIC_CSR_FUNC_COS);
-    cordic_set_precision(CORDIC_CSR_PRECISION_ITER_20);
-    cordic_set_argument_width_16bit();
-    cordic_set_result_width_16bit();
-    cordic_set_number_of_arguments_1();
-    cordic_set_number_of_results_1(); /* one 32-bit read contains two 16-bit results */
 
     /* configure DMAMUX: map dma channels to cordic requests */
     dmamux_reset_dma_channel(DMAMUX1, CORDIC_DMAMUX_WRITE_CH);
