@@ -20,6 +20,4 @@ void adc_start_continuous_mode(void);
 /* Stop continuous mode */
 void adc_stop_continuous_mode(void);
 
-void adc_capture_buffer_no_dma(uint16_t *adc1_data, uint16_t *adc2_data, uint32_t num_samples);
-
 #endif /* ADC_H */

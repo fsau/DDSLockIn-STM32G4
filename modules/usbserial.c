@@ -166,24 +166,29 @@ static enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_d
 	(void)buf;
 	(void)usbd_dev;
 
-	switch (req->bRequest) {
-	case USB_CDC_REQ_SET_CONTROL_LINE_STATE: {
-        if (req->wValue & 1) {   // DTR bit
+    switch (req->bRequest) {
+    case USB_CDC_REQ_SET_CONTROL_LINE_STATE: {
+        /* Only flush RX when the host *clears* DTR (closing the port).
+         * This preserves any bytes that arrived before the host toggled
+         * DTR, avoiding lost characters when the host sends immediately
+         * after enumeration. */
+        if (req->wValue & 1) {   /* DTR bit set */
             cdc_connected = 1;
-            usbserial_flush_rx();   // important!
         } else {
             cdc_connected = 0;
+            usbserial_flush_rx();
         }
-		return USBD_REQ_HANDLED;
-		}
-	case USB_CDC_REQ_SET_LINE_CODING:
-		if (*len < sizeof(struct usb_cdc_line_coding)) {
-			return USBD_REQ_NOTSUPP;
-		}
+        return USBD_REQ_HANDLED;
+    }
+    case USB_CDC_REQ_SET_LINE_CODING:
+        if (*len < sizeof(struct usb_cdc_line_coding)) {
+            return USBD_REQ_NOTSUPP;
+        }
 
-		return USBD_REQ_HANDLED;
-	}
-	return USBD_REQ_NOTSUPP;
+        return USBD_REQ_HANDLED;
+    }
+
+    return USBD_REQ_NOTSUPP;
 }
 
 #define disable_irq() __asm__("cpsid i")

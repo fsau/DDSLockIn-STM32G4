@@ -26,7 +26,8 @@ static size_t user_len = 0;
 
 static volatile int dma_half_flag = 0;
 static volatile int dma_full_flag = 0;
-static volatile int dma_err_flag = 0;
+static volatile int dma_err_flag;
+static volatile int dma_undr_flag = 0;
 
 void dac_init(void)
 {
@@ -55,7 +56,7 @@ void tim6_dac13under_isr(void)
         /* clear underrun flag by writing 1 */
         DAC_SR(DAC_INSTANCE) = DAC_SR_DMAUDR1;
 
-        dma_err_flag = 1;
+        dma_undr_flag = 1;
 
         /* Stop DMA channel and clear flags */
         dma_disable_channel(DMA1, DAC_DMA_CHANNEL);

@@ -224,6 +224,7 @@ int main(void)
 	while (1) {
         uint8_t buf[64];
         uint8_t len = usbserial_read_rx(buf, 64);
+        // usbserial_send_tx(buf,len);
         static uint32_t k = 0;
         // dac_load_data_buffer_single(DAC1,k++, DAC_ALIGN_RIGHT12, DAC_CHANNEL1);
         

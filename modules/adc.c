@@ -175,60 +175,60 @@ void adc_capture_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
     }
 }
 
-void adc_capture_buffer_no_dma(uint16_t *adc1_data, uint16_t *adc2_data, uint32_t num_samples) {
-    /* Capture buffer using polling mode (no DMA) */
+// void adc_capture_buffer_no_dma(uint16_t *adc1_data, uint16_t *adc2_data, uint32_t num_samples) {
+//     /* Capture buffer using polling mode (no DMA) */
     
-    /*  Configure ADC1 and ADC2 for dual simultaneous mode */
-    // Make sure ADCs are enabled and configured
-    adc_set_single_conversion_mode(ADC1);
-    adc_set_single_conversion_mode(ADC2);
-    adc_set_right_aligned(ADC1);
-    adc_set_right_aligned(ADC2);
+//     /*  Configure ADC1 and ADC2 for dual simultaneous mode */
+//     // Make sure ADCs are enabled and configured
+//     adc_set_single_conversion_mode(ADC1);
+//     adc_set_single_conversion_mode(ADC2);
+//     adc_set_right_aligned(ADC1);
+//     adc_set_right_aligned(ADC2);
     
-    // Configure channels (assuming PA0 and PA1)
-    uint8_t adc1_channels[] = {3};  // Channel 3 (PA2)
-    uint8_t adc2_channels[] = {3};  // Channel 3 (PA6)
-    adc_set_regular_sequence(ADC1, 1, adc1_channels);
-    adc_set_regular_sequence(ADC2, 1, adc2_channels);
+//     // Configure channels (assuming PA0 and PA1)
+//     uint8_t adc1_channels[] = {3};  // Channel 3 (PA2)
+//     uint8_t adc2_channels[] = {3};  // Channel 3 (PA6)
+//     adc_set_regular_sequence(ADC1, 1, adc1_channels);
+//     adc_set_regular_sequence(ADC2, 1, adc2_channels);
     
-    // Set sample time (fastest)
-    adc_set_sample_time(ADC1, 0, ADC_SMPR_SMP_2DOT5CYC);
-    adc_set_sample_time(ADC2, 1, ADC_SMPR_SMP_2DOT5CYC);
+//     // Set sample time (fastest)
+//     adc_set_sample_time(ADC1, 0, ADC_SMPR_SMP_2DOT5CYC);
+//     adc_set_sample_time(ADC2, 1, ADC_SMPR_SMP_2DOT5CYC);
     
-    // Configure dual simultaneous mode
-    ADC_CCR(ADC1) &= ~ADC_CCR_DUAL_MASK;
-    ADC_CCR(ADC1) |= ADC_CCR_DUAL_REGULAR_SIMUL;
+//     // Configure dual simultaneous mode
+//     ADC_CCR(ADC1) &= ~ADC_CCR_DUAL_MASK;
+//     ADC_CCR(ADC1) |= ADC_CCR_DUAL_REGULAR_SIMUL;
     
-    /*  Capture samples */
-    for (uint32_t i = 0; i < num_samples; i++) {
-        /* Start conversion on both ADCs */
-        // In dual simultaneous mode, starting ADC1 also starts ADC2
-        adc_start_conversion_regular(ADC1);
+//     /*  Capture samples */
+//     for (uint32_t i = 0; i < num_samples; i++) {
+//         /* Start conversion on both ADCs */
+//         // In dual simultaneous mode, starting ADC1 also starts ADC2
+//         adc_start_conversion_regular(ADC1);
         
-        /* Wait for conversion complete */
-        // Wait for EOC (End of Conversion) flag on ADC1
-        while (!(ADC_ISR(ADC1) & ADC_ISR_EOC));
+//         /* Wait for conversion complete */
+//         // Wait for EOC (End of Conversion) flag on ADC1
+//         while (!(ADC_ISR(ADC1) & ADC_ISR_EOC));
         
-        /* Read ADC1 data */
-        adc1_data[i] = adc_read_regular(ADC1);
+//         /* Read ADC1 data */
+//         adc1_data[i] = adc_read_regular(ADC1);
         
-        /* Clear EOC flag */
-        ADC_ISR(ADC1) |= ADC_ISR_EOC;
+//         /* Clear EOC flag */
+//         ADC_ISR(ADC1) |= ADC_ISR_EOC;
         
-        /* Note: In dual simultaneous mode, ADC2 data is available at the same time
-         * but we need to read it from the common data register (ADC_CDR)
-         */
-        uint32_t combined_data = ADC_CDR(ADC1);
+//         /* Note: In dual simultaneous mode, ADC2 data is available at the same time
+//          * but we need to read it from the common data register (ADC_CDR)
+//          */
+//         uint32_t combined_data = ADC_CDR(ADC1);
         
-        /* Extract ADC2 data from high 16 bits */
-        adc2_data[i] = (uint16_t)(combined_data >> 16);
+//         /* Extract ADC2 data from high 16 bits */
+//         adc2_data[i] = (uint16_t)(combined_data >> 16);
         
-        /* Optional: Add small delay between conversions if needed */
-        // for (volatile int j = 0; j < 10; j++);
-    }
+//         /* Optional: Add small delay between conversions if needed */
+//         // for (volatile int j = 0; j < 10; j++);
+//     }
     
-    ADC_CR(ADC1) &= ~ADC_CR_ADSTART;
-}
+//     ADC_CR(ADC1) &= ~ADC_CR_ADSTART;
+// }
 
 void adc_start_continuous_mode(void) {
     /* Configure DMA for circular mode */
