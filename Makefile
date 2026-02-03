@@ -5,9 +5,9 @@ OBJDUMP = $(CROSS_COMPILE)objdump
 READELF = $(CROSS_COMPILE)readelf
 NM = $(CROSS_COMPILE)nm
 SIZE = $(CROSS_COMPILE)size
-EXTRADEFS = -DLEGACY_MODE
+DEFS ?=
 CPUFLAGS = -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
-CFLAGS = -Wall -Wextra -g3 -Og -MD $(CPUFLAGS) -DSTM32G4 -I./libopencm3/include -Imodules $(EXTRADEFS)
+CFLAGS = -Wall -Wextra -g3 -Og -MD $(CPUFLAGS) -DSTM32G4 -I./libopencm3/include -Imodules $(DEFS)
 LDFLAGS = $(CPUFLAGS) -nostartfiles -L./libopencm3/lib -Wl,-T,$(LDSCRIPT) -Wl,-Map,$(TARGET).map -specs=nano.specs
 LDLIBS = -lopencm3_stm32g4 -lc -lnosys
 

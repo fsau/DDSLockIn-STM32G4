@@ -8,8 +8,6 @@
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/cm3/scb.h>
 
-#define LEGACY_MODE
-
 #include "usbserial.h"
 #include "adc.h"
 #include "spi.h"
