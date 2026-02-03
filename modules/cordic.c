@@ -15,8 +15,8 @@
 #define CORDIC_DMAMUX_WRITE_CH   DMA_CHANNEL3
 #define CORDIC_DMAMUX_READ_CH    DMA_CHANNEL4
 
-static volatile int transfer_in_progress = 0;
-static volatile int transfer_done = 0;
+volatile bool cordic_transfer_in_progress = 0;
+volatile int cordic_transfer_done = 0;
 
 void cordic_init(void)
 {
@@ -38,7 +38,7 @@ int cordic_start_dma(volatile uint32_t *write_buf32, volatile uint32_t *read_buf
 {
     if (!write_buf32 || !read_buf32 || len == 0)
         return -1;
-    if (transfer_in_progress)
+    if (cordic_transfer_in_progress)
         return -2; /* busy */
 
     /* configure DMAMUX: map dma channels to cordic requests */
@@ -96,18 +96,18 @@ int cordic_start_dma(volatile uint32_t *write_buf32, volatile uint32_t *read_buf
     cordic_enable_dma_write();
     cordic_enable_dma_read();
     /* reset transfer flags and enable DMA channels. Start read channel first */
-    transfer_done = 0;
+    cordic_transfer_done = 0;
     dma_enable_channel(DMA1, CORDIC_DMA_READ_CHANNEL);
     dma_enable_channel(DMA1, CORDIC_DMA_WRITE_CHANNEL);
 
-    transfer_in_progress = 1;
+    cordic_transfer_in_progress = 1;
     return 0;
 }
 
 int cordic_transfer_complete(void)
 {
-    if (transfer_done) {
-        transfer_done = 0; /* clear on read */
+    if (cordic_transfer_done) {
+        cordic_transfer_done = 0; /* clear on read */
         return 1;
     }
     return 0;
@@ -115,7 +115,7 @@ int cordic_transfer_complete(void)
 
 void cordic_abort(void)
 {
-    if (!transfer_in_progress)
+    if (!cordic_transfer_in_progress)
         return;
 
     dma_disable_channel(DMA1, CORDIC_DMA_READ_CHANNEL);
@@ -127,7 +127,7 @@ void cordic_abort(void)
     cordic_disable_dma_read();
     cordic_disable_dma_write();
 
-    transfer_in_progress = 0;
+    cordic_transfer_in_progress = 0;
 }
 
 /* DMA IRQ handler: unpack results and mark transfer done.
@@ -170,7 +170,7 @@ void dma1_channel1_isr(void) { }
             (void)cordic_read_32bit_result();
         }
 
-        transfer_in_progress = 0;
-        transfer_done = 1;
+        cordic_transfer_in_progress = 0;
+        cordic_transfer_done++;
     }
 }

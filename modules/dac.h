@@ -14,13 +14,18 @@ void dac_init(void);
 // Start circular DMA output. Buffer must remain valid while running.
 // samples: pointer to uint16_t samples (12-bit), length: number of samples
 // Returns 0 on success.
-int dac_start(volatile uint16_t *samples, size_t length);
+int dac_start(volatile uint32_t *samples, size_t length);
 
 // Stop DMA and DAC output.
 void dac_stop(void);
 
 // Query running state (non-zero when active)
 int dac_running(void);
+
+extern volatile int dac_half_flag;
+extern volatile int dac_full_flag;
+extern volatile int dac_err_flag;
+extern volatile int dma_undr_flag;
 
 // DMA interrupt flags (half-transfer, transfer-complete, error)
 int dac_dma_half_flag(void);

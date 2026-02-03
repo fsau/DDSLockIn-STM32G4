@@ -20,14 +20,14 @@
 #define DAC_DMA_CHANNEL DMA_CHANNEL2
 #define DAC_DMAMUX_CHANNEL DMA_CHANNEL2
 
-static volatile int running = 0;
-static const uint16_t *user_buf = NULL;
+static volatile int dac_running_flag = 0;
+static const uint32_t *user_buf = NULL;
 static size_t user_len = 0;
 
-static volatile int dma_half_flag = 0;
-static volatile int dma_full_flag = 0;
-static volatile int dma_err_flag;
-static volatile int dma_undr_flag = 0;
+volatile int dac_half_flag = 0;
+volatile int dac_full_flag = 0;
+volatile int dac_err_flag = 0;
+volatile int dma_undr_flag = 0;
 
 void dac_init(void)
 {
@@ -42,7 +42,7 @@ void dac_init(void)
     dac_set_mode(DAC_INSTANCE, DAC_MCR_MODE1_E_BUFF);
     dac_disable(DAC_INSTANCE, DAC_CHANNEL);
     dac_trigger_enable(DAC_INSTANCE, DAC_CHANNEL);
-    dac_set_trigger_source(DAC_INSTANCE, DAC_CR_TSEL1_T3);
+    dac_set_trigger_source(DAC_INSTANCE, DAC_CR_TSEL1_T6);
     dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL);
     dac_set_mode(DAC1, DAC_MCR_SINFORMAT1);
     
@@ -73,26 +73,26 @@ void tim6_dac13under_isr(void)
             dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL);
             dac_enable(DAC_INSTANCE, DAC_CHANNEL);
 
-            running = 1;
+            dac_running_flag = 1;
         }
     }
 }
 
-int dac_start(volatile uint16_t *samples, size_t length)
+int dac_start(volatile uint32_t *samples, size_t length)
 {
     if (!samples || length == 0)
         return -1;
-    if (running)
+    if (dac_running_flag)
         return -2;
 
     /* remember buffer so we can restart on underrun */
-    user_buf = (const uint16_t *)samples;
+    user_buf = (const uint32_t *)samples;
     user_len = length;
 
     /* Configure DMA1 channel for peripheral<-memory circular transfers */
     dma_channel_reset(DMA1, DAC_DMA_CHANNEL);
     dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_FLAGS);
-    dma_set_peripheral_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)&DAC_DHR12R1(DAC1));
+    dma_set_peripheral_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)&DAC_DHR12L1(DAC1));
     dma_set_memory_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)samples);
     dma_set_number_of_data(DMA1, DAC_DMA_CHANNEL, (uint16_t)length);
     dma_set_peripheral_size(DMA1, DAC_DMA_CHANNEL, DMA_CCR_PSIZE_32BIT);
@@ -132,19 +132,19 @@ int dac_start(volatile uint16_t *samples, size_t length)
 
     nvic_enable_irq(NVIC_TIM6_DAC13UNDER_IRQ);
 
-    running = 1;
+    dac_running_flag = 1;
     return 0;
 }
 
 /* Flag accessors */
-int dac_dma_half_flag(void) { return dma_half_flag; }
-int dac_dma_full_flag(void) { return dma_full_flag; }
-int dac_dma_error_flag(void) { return dma_err_flag; }
-void dac_dma_clear_flags(void) { dma_half_flag = dma_full_flag = dma_err_flag = 0; }
+int dac_dac_half_flag(void) { return dac_half_flag; }
+int dac_dac_full_flag(void) { return dac_full_flag; }
+int dac_dma_error_flag(void) { return dac_err_flag; }
+void dac_dma_clear_flags(void) { dac_half_flag = dac_full_flag = dac_err_flag = 0; }
 
 void dac_stop(void)
 {
-    if (!running)
+    if (!dac_running_flag)
         return;
 
     dma_disable_channel(DMA1, DAC_DMA_CHANNEL);
@@ -152,12 +152,12 @@ void dac_stop(void)
     dac_dma_disable(DAC_INSTANCE, DAC_CHANNEL);
     dac_disable(DAC_INSTANCE, DAC_CHANNEL);
     /* Do not stop TIM6 here; it may be used by other peripherals */
-    running = 0;
+    dac_running_flag = 0;
 }
 
 int dac_running(void)
 {
-    return running;
+    return dac_running_flag;
 }
 
 /* DMA IRQ handler for the configured DAC DMA channel.
@@ -184,24 +184,24 @@ void dma1_channel1_isr(void) { }
     /* Half-transfer */
     if (dma_get_interrupt_flag(DMA1, DAC_DMA_CHANNEL, DMA_HTIF)) {
         dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_HTIF);
-        dma_half_flag = 1;
+        dac_half_flag++;
     }
 
     /* Transfer complete (end of buffer) */
     if (dma_get_interrupt_flag(DMA1, DAC_DMA_CHANNEL, DMA_TCIF)) {
         dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_TCIF);
-        dma_full_flag = 1;
+        dac_full_flag++;
     }
 
     /* Transfer error */
     if (dma_get_interrupt_flag(DMA1, DAC_DMA_CHANNEL, DMA_TEIF)) {
         dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_TEIF);
-        dma_err_flag = 1;
+        dac_err_flag++;
 
         /* try to stop gracefully */
         dma_disable_channel(DMA1, DAC_DMA_CHANNEL);
         dac_dma_disable(DAC_INSTANCE, DAC_CHANNEL);
         dac_disable(DAC_INSTANCE, DAC_CHANNEL);
-        running = 0;
+        dac_running_flag = 0;
     }
 }

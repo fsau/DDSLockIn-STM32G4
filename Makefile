@@ -66,8 +66,13 @@ openocd:
 gdb: $(TARGET).elf
 	arm-none-eabi-gdb $(TARGET).elf 
 
-dfu:  $(TARGET).bin
-	dfu-util -a 0 -s 0x08000000:leave -D $<
+dfu: $(TARGET).bin
+	DEV=$$(ls /dev/ttyACM* 2>/dev/null | head -n1); \
+	if [ -n "$$DEV" ]; then \
+		echo -ne 'd' > $$DEV; \
+	fi; \
+	sleep 0.5; \
+	dfu-util -a 0 -s 0x08000000:leave -D $< && break;
 
 size: $(TARGET).elf
 	$(NM) -S --size-sort --radix=d $<

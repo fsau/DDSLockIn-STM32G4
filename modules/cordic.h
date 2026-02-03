@@ -13,6 +13,10 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
+
+extern volatile bool cordic_transfer_in_progress;
+extern volatile int cordic_transfer_done;
 
 // Initialize CORDIC peripheral and required DMA/clocks. Must be called once.
 void cordic_init(void);

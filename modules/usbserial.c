@@ -261,8 +261,8 @@ void reset_clocks_to_default(void)
 volatile uint32_t rxi = 0, rxo = 0;
 volatile uint32_t txi = 0, txo = 0;
 
-uint8_t rxbuff[BUFF_SIZE];
-uint8_t txbuff[BUFF_SIZE];
+uint8_t rxbuff[USB_BUFF_SIZE];
+uint8_t txbuff[USB_BUFF_SIZE];
 
 volatile uint32_t meas_flag = 0;
 volatile uint32_t freq_flag = 0;
@@ -282,7 +282,7 @@ static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
     uint32_t len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
 
     for (uint32_t i = 0; i < len; i++) {
-        uint32_t next = (rxi + 1) % BUFF_SIZE;
+        uint32_t next = (rxi + 1) % USB_BUFF_SIZE;
         if (next != rxo) {
             rxbuff[rxi] = buf[i];
             rxi = next;
@@ -307,13 +307,13 @@ static void cdcacm_data_tx_cb(usbd_device *usbd_dev, uint8_t ep)
         return;
     }
 
-    uint32_t len = (txo > txi) ? (txo - txi) : (BUFF_SIZE - txi);
+    uint32_t len = (txo > txi) ? (txo - txi) : (USB_BUFF_SIZE - txi);
     if (len > 64) len = 64;
 
     uint32_t sent = usbd_ep_write_packet(usbd_dev, 0x82, &txbuff[txi], len);
 
     if (sent) {
-        txi = (txi + sent) % BUFF_SIZE;
+        txi = (txi + sent) % USB_BUFF_SIZE;
         tx_busy = 1;
         if((txi == txo)&&(sent == 64)) {
             tx_zlp = 1;
@@ -328,7 +328,7 @@ void usbserial_send_tx(uint8_t *data, uint32_t len)
 
     while (i < len) {
         disable_irq();
-        uint32_t next = (txo + 1) % BUFF_SIZE;
+        uint32_t next = (txo + 1) % USB_BUFF_SIZE;
 
         if (next != txi) {
             txbuff[txo] = data[i++];
@@ -362,7 +362,7 @@ uint32_t usbserial_read_rx(uint8_t* data, uint32_t max_len)
     if (rxi >= rxo) {
         bytes_available = rxi - rxo;
     } else {
-        bytes_available = BUFF_SIZE - rxo + rxi;
+        bytes_available = USB_BUFF_SIZE - rxo + rxi;
     }
     
     // Limit to requested length
@@ -371,7 +371,7 @@ uint32_t usbserial_read_rx(uint8_t* data, uint32_t max_len)
     // Read data from buffer
     for (uint32_t i = 0; i < bytes_to_read; i++) {
         data[i] = rxbuff[rxo];
-        rxo = (rxo + 1) % BUFF_SIZE;
+        rxo = (rxo + 1) % USB_BUFF_SIZE;
     }
     
     // Re-enable interrupts
@@ -392,7 +392,7 @@ uint32_t usbserial_rx_available(void)
     if (rxi >= rxo) {
         available = rxi - rxo;
     } else {
-        available = BUFF_SIZE - rxo + rxi;
+        available = USB_BUFF_SIZE - rxo + rxi;
     }
     enable_irq();
     
@@ -413,7 +413,7 @@ uint8_t usbserial_read_byte(uint8_t* data, uint32_t timeout_ms)
         disable_irq();
         if (rxi != rxo) {  // Buffer not empty
             *data = rxbuff[rxo];
-            rxo = (rxo + 1) % BUFF_SIZE;
+            rxo = (rxo + 1) % USB_BUFF_SIZE;
             enable_irq();
             return 1;
         }
@@ -492,33 +492,33 @@ void usbserial_flush_rx(void)
     enable_irq();
 }
 
-/**
- * @brief Advanced: Read with callback for processing
- * @param process_callback Function to process each byte
- * @param context User context pointer
- * @return Number of bytes processed
- */
-uint32_t usbserial_process_rx(usbserial_process_cb_t process_callback, void* context)
-{
-    uint32_t bytes_processed = 0;
-    uint8_t ch;
+// /**
+//  * @brief Advanced: Read with callback for processing
+//  * @param process_callback Function to process each byte
+//  * @param context User context pointer
+//  * @return Number of bytes processed
+//  */
+// uint32_t usbserial_process_rx(usbserial_process_cb_t process_callback, void* context)
+// {
+//     uint32_t bytes_processed = 0;
+//     uint8_t ch;
     
-    while (usbserial_rx_available() > 0) {
-        disable_irq();
-        ch = rxbuff[rxo];
-        rxo = (rxo + 1) % BUFF_SIZE;
-        enable_irq();
+//     while (usbserial_rx_available() > 0) {
+//         disable_irq();
+//         ch = rxbuff[rxo];
+//         rxo = (rxo + 1) % USB_BUFF_SIZE;
+//         enable_irq();
         
-        // Call user callback
-        if (process_callback(ch, context) == 0) {
-            break;  // Callback asked to stop
-        }
+//         // Call user callback
+//         if (process_callback(ch, context) == 0) {
+//             break;  // Callback asked to stop
+//         }
         
-        bytes_processed++;
-    }
+//         bytes_processed++;
+//     }
     
-    return bytes_processed;
-}
+//     return bytes_processed;
+// }
 
 static void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 {
@@ -576,4 +576,89 @@ void usb_hp_isr(void)
 void usb_lp_isr(void)
 {
     usbd_poll(usbd_dev);
+}
+/**
+ * @brief Disconnect and reset USB peripheral completely
+ * 
+ * This function safely disables USB, resets the peripheral,
+ * and puts pins in a safe state. Call usbserial_init() to restart.
+ */
+void usbserial_disconnect(void)
+{
+    // 1. Disable USB interrupts
+    nvic_disable_irq(NVIC_USB_HP_IRQ);
+    nvic_disable_irq(NVIC_USB_LP_IRQ);
+    nvic_disable_irq(NVIC_USB_WAKEUP_IRQ);
+    
+    // 2. Reset connection flag and buffer indices
+    disable_irq();
+    cdc_connected = 0;
+    rxi = rxo = 0;
+    txi = txo = 0;
+    tx_busy = 0;
+    tx_zlp = 0;
+    enable_irq();
+    
+    // 3. Deinit USB peripheral if device exists
+    if (usbd_dev != NULL) {
+        // Disconnect USB from host (pull-up disable)
+        // Note: For STM32G4, USB_FS pull-up is internal on PA12 (DP line)
+        // We'll reset the peripheral which effectively disconnects
+        
+        // Force USB peripheral reset
+        RCC_APB1RSTR1 |= RCC_APB1RSTR1_USBRST;
+        __asm__("nop");
+        __asm__("nop");
+        RCC_APB1RSTR1 &= ~RCC_APB1RSTR1_USBRST;
+        
+        // Clear USB device pointer
+        usbd_dev = NULL;
+    }
+    
+    // 4. Disable USB peripheral clock
+    RCC_APB1ENR1 &= ~RCC_APB1ENR1_USBEN;
+    
+    // 6. Disable CRS (Clock Recovery System) if it was enabled
+    rcc_periph_clock_disable(RCC_CRS);
+    
+    // 7. Reset USB clock source (HSI48)
+    RCC_CRRCR &= ~RCC_CRRCR_HSI48ON;
+    
+    // 8. Clear any pending USB interrupts
+    NVIC_ICPR(NVIC_USB_HP_IRQ) = 1;
+    NVIC_ICPR(NVIC_USB_LP_IRQ) = 1;
+    NVIC_ICPR(NVIC_USB_WAKEUP_IRQ) = 1;
+    
+    // 9. Optional: Clear USB_SRAM (USB dedicated RAM)
+    // STM32G4 has 1KB USB dedicated RAM at 0x40006000-0x400063FF
+    // Might be good to clear to avoid stale data
+    volatile uint32_t *usb_sram = (volatile uint32_t*)0x40006000;
+    for (int i = 0; i < 256; i++) { // 256 * 4 bytes = 1KB
+        usb_sram[i] = 0x00000000;
+    }
+    
+    // 10. Clear USB control buffer
+    memset(usbd_control_buffer, 0, sizeof(usbd_control_buffer));
+    
+    // 11. Reset USB buffer indices in software
+    memset(rxbuff, 0, USB_BUFF_SIZE);
+    memset(txbuff, 0, USB_BUFF_SIZE);
+}
+
+/**
+ * @brief Check if USB is currently connected and functional
+ * @return 1 if USB is initialized and connected, 0 otherwise
+ */
+uint8_t usbserial_is_connected(void)
+{
+    return (usbd_dev != NULL) && cdc_connected;
+}
+
+/**
+ * @brief Get USB device status
+ * @return Pointer to USB device if initialized, NULL otherwise
+ */
+usbd_device* usbserial_get_device(void)
+{
+    return usbd_dev;
 }
