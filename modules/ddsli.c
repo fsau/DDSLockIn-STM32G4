@@ -486,16 +486,16 @@ bool ddsli_step(void)
         return false; // CORDIC busy or error
     }
     
-    // Blocking wait for CORDIC completion only
-    while (!(*cordic_done_flag_ptr)) {
-        // Busy wait for CORDIC
-    }
+    // // Blocking wait for CORDIC completion only
+    // while (!(*cordic_done_flag_ptr)) {
+    //     // Busy wait for CORDIC
+    // }
     
-    // Clear CORDIC flag
-    *cordic_done_flag_ptr = 0;
+    // // Clear CORDIC flag
+    // *cordic_done_flag_ptr = 0;
     
     // Process CORDIC results to DAC buffer
-    dds_process_dac_halfbuffer(next_half);
+    // dds_process_dac_halfbuffer(next_half);
     
     // Move to next half for next iteration
     current_half = (next_half + 1) % 2;

@@ -3,10 +3,14 @@
 
 #include <stdint.h>
 
+#ifdef LEGACY_MODE
 #define ADC_BUF_LEN 1024
+#else
+#define ADC_BUF_LEN 16
+#endif
 
 extern volatile uint32_t adc_buffer[ADC_BUF_LEN];
-extern volatile uint8_t adc_capture_complete;
+extern volatile uint32_t adc_capture_complete;
 
 /* Initialize ADC1+ADC2 in dual simultaneous mode, default buffer */
 void adc_dual_dma_init(void);

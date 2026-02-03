@@ -92,7 +92,7 @@ int dac_start(volatile uint32_t *samples, size_t length)
     /* Configure DMA1 channel for peripheral<-memory circular transfers */
     dma_channel_reset(DMA1, DAC_DMA_CHANNEL);
     dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_FLAGS);
-    dma_set_peripheral_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)&DAC_DHR12L1(DAC1));
+    dma_set_peripheral_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)&DAC_DHR12R1(DAC1));
     dma_set_memory_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)samples);
     dma_set_number_of_data(DMA1, DAC_DMA_CHANNEL, (uint16_t)length);
     dma_set_peripheral_size(DMA1, DAC_DMA_CHANNEL, DMA_CCR_PSIZE_32BIT);

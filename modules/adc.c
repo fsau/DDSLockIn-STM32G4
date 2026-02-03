@@ -4,8 +4,8 @@
 #include <libopencm3/stm32/dmamux.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/gpio.h>
+#include "adc.h"
 
-#define ADC_BUF_LEN 1024
 volatile uint32_t adc_buffer[ADC_BUF_LEN];
 volatile uint32_t adc_capture_complete = 0;
 
@@ -124,7 +124,6 @@ void adc_dual_dma_init(void) {
         ADC12_CFGR1_EXTSEL_TIM6_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
 }
 
-
 void adc_dualcirc_dma_init(void *buf, uint32_t len) {
     rcc_periph_clock_enable(RCC_GPIOA);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO6);
@@ -203,9 +202,7 @@ void adc_dualcirc_dma_init(void *buf, uint32_t len) {
     dma_set_memory_size(DMA1, DMA_CHANNEL1, DMA_CCR_MSIZE_32BIT);
     
     dma_set_priority(DMA1, DMA_CHANNEL1, DMA_CCR_PL_VERY_HIGH);
-    
-    // Circular
-    DMA_CCR(DMA1, DMA_CHANNEL1) |= ~DMA_CCR_CIRC;
+    dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
 
     /* Route ADC1 DMA request to DMA1 Channel 1 */
     dmamux_set_dma_channel_request(
@@ -246,10 +243,10 @@ void adc_capture_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
     dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_TCIF);
     dma_enable_channel(DMA1, DMA_CHANNEL1);
     
-    // adc_set_single_conversion_mode(ADC1);
-    // adc_set_single_conversion_mode(ADC2);
-    adc_set_continuous_conversion_mode(ADC1);
-    adc_set_continuous_conversion_mode(ADC2);
+    adc_set_single_conversion_mode(ADC1);
+    adc_set_single_conversion_mode(ADC2);
+    // adc_set_continuous_conversion_mode(ADC1);
+    // adc_set_continuous_conversion_mode(ADC2);
     adc_set_right_aligned(ADC1);
     adc_set_right_aligned(ADC2);
     

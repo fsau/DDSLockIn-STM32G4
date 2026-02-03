@@ -161,7 +161,11 @@ typedef struct {
  * -------------------------------------------------------------------------- */
 
 // Samples per half-buffer (total buffer size = 2 * HB_LEN * sizeof(type))
-#define HB_LEN 16U
+#ifndef LEGACY_MODE
+#define HB_LEN 256U
+#else
+#define HB_LEN 16
+#endif
 
 /* Initialize internal state, buffers, and peripherals.
  * Must be called once before any processing.

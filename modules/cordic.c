@@ -27,7 +27,7 @@ void cordic_init(void)
 
     /* configure CORDIC for 16-bit argument/result (returns packed 32-bit results) */
     cordic_set_function(CORDIC_CSR_FUNC_COS);
-    cordic_set_precision(CORDIC_CSR_PRECISION_ITER_20);
+    cordic_set_precision(CORDIC_CSR_PRECISION_ITER_08);
     cordic_set_argument_width_16bit();
     cordic_set_result_width_16bit();
     cordic_set_number_of_arguments_1();

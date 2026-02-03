@@ -8,6 +8,8 @@
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/cm3/scb.h>
 
+#define LEGACY_MODE
+
 #include "usbserial.h"
 #include "adc.h"
 #include "spi.h"
@@ -222,14 +224,14 @@ int main(void)
     gpio_set(GPIOC, GPIO6);
 
     usbserial_init();
-    adc_dual_dma_init();
     spi_setup();
     ad9833_init();
     dpot_init();
+
+#ifdef LEGACY_MODE
+    adc_dual_dma_init();
     cordic_init();
     dac_init();
-    // ddsli_setup();
-
    for(uint32_t i = 0; i < 33; i++)
     {
         angles[i] = ((uint32_t)0x6A00<<16) + (i * 0xFFFF) / 33; // Full scale angles
@@ -239,6 +241,9 @@ int main(void)
     for(uint32_t i = 0; i < 1000000; i+=1) __asm__("nop");
 
     dac_start(results, 33);
+#else
+    ddsli_setup();
+#endif
 
     timers_trigger_init();
 
@@ -255,7 +260,7 @@ int main(void)
     uint8_t cmd_digits = 0;
 
 	while (1) {
-        // ddsli_step();
+        ddsli_step();
         uint8_t buf[64];
         uint8_t len = usbserial_read_rx(buf, 64);
         // usbserial_send_tx(buf,len);
@@ -278,10 +283,12 @@ int main(void)
                         cmd_digits = 0;
                     }
                     else if(buf[i] == 'M' || buf[i] == 'm') {
+#ifdef LEGACY_MODE                    
                         // ADC capture command (immediate)
                         adc_capture_buffer(ch0, ch1);
                         usbserial_send_tx((uint8_t*)ch0, sizeof(ch0));
                         usbserial_send_tx((uint8_t*)ch1, sizeof(ch1));
+#endif                        
                     }
                     else if(buf[i] == 'D' || buf[i] == 'd') {
                         // Jump to DFU bootloader
