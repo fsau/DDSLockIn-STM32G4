@@ -35,8 +35,8 @@ typedef struct {
 typedef union {
     uint32_t raw;
     struct {
-        uint16_t adc1_data;  // Channel 0 (ADC1), 12-bit right-aligned
-        uint16_t adc2_data;  // Channel 1 (ADC2), 12-bit right-aligned
+        int16_t adc1_data;  // Channel 0 (ADC1), 12-bit right-aligned
+        int16_t adc2_data;  // Channel 1 (ADC2), 12-bit right-aligned
     };
 } dual_adc_sample_t;
 
@@ -245,7 +245,7 @@ static inline void dds_process_linear_combination(
         if (combined2 > 32767) {
             result.adc2_data = 32767;
         } else if (combined2 < -32768) {
-            result.adc2_data = (uint32_t)(-32768);
+            result.adc2_data = (uint16_t)(-32768);
         } else {
             result.adc2_data = (int32_t)combined2;
         }
@@ -283,7 +283,6 @@ static inline void dds_process_dac_halfbuffer(uint32_t dac_half_idx,
 static inline void dds_mix_adc_sincos(
     volatile dual_adc_sample_t *adc_src,
     volatile cordic_out_sample_t *sincos_src,
-    // volatile demod_products_t *demod_dest, // use fifo directly
     uint32_t len)
 {
     int32_t acc_ch0_cos = 0;
@@ -292,37 +291,26 @@ static inline void dds_mix_adc_sincos(
     int32_t acc_ch1_sin = 0;
 
     for (uint32_t i = 0; i < len; i++) {
-        // Get dual ADC sample
-        dual_adc_sample_t adc_sample = adc_src[i];
-        
-        // Convert ADC to signed offset binary (12-bit: 0-4095 -> -2048 to +2047)
-        int32_t adc_ch0 = ((int32_t)adc_sample.adc1_data) - 2048;  // -2048 to +2047
-        int32_t adc_ch1 = ((int32_t)adc_sample.adc2_data) - 2048;
+        // Convert ADC to signed offset binary 
+        int16_t adc_ch0 = adc_src[i].adc1_data - 2048; 
+        int16_t adc_ch1 = adc_src[i].adc2_data - 2048;
         
         // Get sincos values (Q1.15)
-        int32_t cos_val = (int32_t)sincos_src[i].cos;  // cos
-        int32_t sin_val = (int32_t)sincos_src[i].sin;  // sin
+        int16_t cos_val = (sincos_src[i].cos);  // cos
+        int16_t sin_val = (sincos_src[i].sin);  // sin
         
-        // Calculate products: ADC (Q4.12) × sincos (Q1.15) = Q5.27
-        // Scale down to Q1.15 for storage: right shift by (4+12) = 16
-        int64_t prod_ch0_cos = (int64_t)adc_ch0 * cos_val;
-        int64_t prod_ch0_sin = (int64_t)adc_ch0 * sin_val;
-        int64_t prod_ch1_cos = (int64_t)adc_ch1 * cos_val;
-        int64_t prod_ch1_sin = (int64_t)adc_ch1 * sin_val;
-        
-        // Store to local buffer buffer
-        acc_ch0_cos += (int32_t)(prod_ch0_cos >> 32);
-        acc_ch0_sin += (int32_t)(prod_ch0_sin >> 32);
-        acc_ch1_cos += (int32_t)(prod_ch1_cos >> 32);
-        acc_ch1_sin += (int32_t)(prod_ch1_sin >> 32);
+        // Multiply and store to local buffer buffer
+        acc_ch0_cos += ((int32_t)adc_ch0 * cos_val)>>16;
+        acc_ch0_sin += ((int32_t)adc_ch0 * sin_val)>>16;
+        acc_ch1_cos += ((int32_t)adc_ch1 * cos_val)>>16;
+        acc_ch1_sin += ((int32_t)adc_ch1 * sin_val)>>16;
     }
 
     ddsli_output_t output = {0};
-    float scale = 1.0f / (16 * 32768.0f);
-    output.chA[0] = (float)(acc_ch0_cos) * scale;
-    output.chA[1] = (float)(acc_ch0_sin) * scale;
-    output.chB[0] = (float)(acc_ch1_cos) * scale;
-    output.chB[1] = (float)(acc_ch1_sin) * scale;
+    output.chA[0] = acc_ch0_cos;
+    output.chA[1] = acc_ch0_sin;
+    output.chB[0] = acc_ch1_cos;
+    output.chB[1] = acc_ch1_sin;
 
     // Store to FIFO directly
     uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
@@ -336,7 +324,7 @@ static inline void dds_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sincos
     volatile dual_adc_sample_t *adc_src = &adc_buf[adc_half_idx * HB_LEN];
     volatile cordic_out_sample_t *sincos_src = &sincos_buf[sincos_offset * HB_LEN];
     
-    dds_mix_adc_sincos(adc_src, sincos_src, HB_LEN);
+    dds_mix_adc_sincos(adc_src, (void*)adc_src, HB_LEN);
 }
 
 // -----------------------------------------------------------------------------
@@ -401,7 +389,7 @@ void ddsli_setup(void)
         __asm__("nop");
     }
     
-    ddsli_current_half = 0;
+    ddsli_current_half = 1;
     steps_counter = 0;
 
     dac_start((volatile uint32_t *)dac_buf, 2 * HB_LEN);
@@ -427,11 +415,31 @@ bool ddsli_step_ready(void)
     return false;
 }
 
+/*
+Initilization steps: (sincos -> DAC is omitted for simplicity)
+
+ 1. Load phase 0 and 1
+ 2. Run CORDIC on phase 0 and 1 -> sincos 0 and 1 -> dac 0 and 1
+ 3. Load phase 2
+ 4. Set halfs = 1
+ 5. Start DAC/ADC
+- Wait DAC half buffer: dac/adc 0 done. halfs = 2
+ 6. Run CORDIC on phase 2 -> sincos 2 -> dac 2
+ 7. Run demod on adc 0/sincos 0
+ 8. Load phase 3 
+- Wait DAC full buffer: dac/adc 3 done. halfs = 3
+ 9. Run CORDIC on phase 3 -> sincos 3 -> dac 3
+ 10. Run demod for adc 1/sincos 1
+ 11. Load phase 4 
+- Wait DAC half buffer: dac/adc 0 done. halfs = 4
+ 12. Run CORDIC on phase 4 -> sincos 4 -> dac 4 
+ 13. Run demod for adc 2/sincos 2
+ 14. Load phase 5
+- Wait....
+*/
+
 bool ddsli_step(void)
 {
-    uint8_t sincos_thirds = ddsli_current_half % SINCOS_BUFF_HALFS;
-    uint8_t buffers_half = ddsli_current_half % 2;
-
     // Check if DAC buffer is ready to be updated (half or full buffer played)
     if (!(*dac_half_flag_ptr) &&
         !(*dac_full_flag_ptr) &&
@@ -441,38 +449,37 @@ bool ddsli_step(void)
     }
     else if (*cordic_done_flag_ptr)
     {
-        // CORDIC finished
         (*cordic_done_flag_ptr)--;
 
-        // Process DAC half-buffer
+        uint8_t sincos_thirds = ddsli_current_half % SINCOS_BUFF_HALFS;
+        uint8_t buffers_half = ddsli_current_half % 2;
         dds_process_dac_halfbuffer(buffers_half, sincos_thirds);
-        ddsli_current_half = (ddsli_current_half + 1) % (2*SINCOS_BUFF_HALFS);
         return 2;
     }
     else if (*dac_half_flag_ptr)
     {
-        ddsli_current_half &= ~1;
+        ddsli_current_half |= 1;
         (*dac_half_flag_ptr)--;
     }
     else if (*dac_full_flag_ptr)
     {
-        ddsli_current_half |= 1;
+        ddsli_current_half &= ~1;
         (*dac_full_flag_ptr)--;
     }
 
-    // Start CORDIC DMA
-    if (cordic_start_dma((volatile uint32_t *)&phase_buf[(!buffers_half) * HB_LEN], 
-                        (volatile uint32_t *)&sincos_buf[sincos_thirds * HB_LEN], 
-                        HB_LEN) != 0)
-    {
-        return 0; // CORDIC busy or error
-    }
+    ddsli_current_half = (ddsli_current_half + 1) % (2*SINCOS_BUFF_HALFS);    
+    uint8_t sincos_thirds = ddsli_current_half % SINCOS_BUFF_HALFS;
+    uint8_t buffers_half = ddsli_current_half % 2;
+
+    cordic_start_dma((volatile uint32_t *)&phase_buf[buffers_half * HB_LEN], 
+                     (volatile uint32_t *)&sincos_buf[sincos_thirds * HB_LEN], 
+                        HB_LEN);
 
     // Generate next DDS phase half-buffer
-    dds_generate_phase_halfbuffer_idx(buffers_half);
+    dds_generate_phase_halfbuffer_idx(!buffers_half);
 
     // Mix ADC half-buffer with previous CORDIC output
-    dds_mix_adc_halfbuffer(buffers_half, ((sincos_thirds + 2) % SINCOS_BUFF_HALFS)); 
+    dds_mix_adc_halfbuffer(buffers_half, ((sincos_thirds + 1) % SINCOS_BUFF_HALFS)); 
     
     return 1;
 }

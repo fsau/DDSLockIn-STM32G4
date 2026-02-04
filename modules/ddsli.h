@@ -150,9 +150,9 @@
 /* Demodulated / filtered output sample. */
 typedef struct {
     float frequency;
-    float dds_amplitude;
-    float chA[2];
-    float chB[2];
+    uint16_t dds_amplitude;
+    int32_t chA[2];
+    int32_t chB[2];
 } ddsli_output_t;
 
 /* --------------------------------------------------------------------------
@@ -161,7 +161,7 @@ typedef struct {
 
 // Samples per half-buffer (total buffer size = 2 * HB_LEN * sizeof(type))
 #ifndef LEGACY_MODE
-#define HB_LEN 128U
+#define HB_LEN 256U
 #else
 #define HB_LEN 16
 #endif

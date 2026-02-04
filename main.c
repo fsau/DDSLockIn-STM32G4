@@ -283,12 +283,12 @@ int main(void)
                         cmd_digits = 0;
                     }
                     else if(buf[i] == 'M' || buf[i] == 'm') {
-#ifdef LEGACY_MODE                    
-                        // ADC capture command (immediate)
-                        adc_capture_buffer(ch0, ch1);
-                        usbserial_send_tx((uint8_t*)ch0, sizeof(ch0));
-                        usbserial_send_tx((uint8_t*)ch1, sizeof(ch1));
-#endif
+// #ifdef LEGACY_MODE                    
+//                         // ADC capture command (immediate)
+//                         adc_capture_buffer(ch0, ch1);
+//                         usbserial_send_tx((uint8_t*)ch0, sizeof(ch0));
+//                         usbserial_send_tx((uint8_t*)ch1, sizeof(ch1));
+// #endif
                     }
                     else if(buf[i] == 'D' || buf[i] == 'd') {
                         // Jump to DFU bootloader
@@ -343,6 +343,43 @@ int main(void)
             lasttick = clock_ticks/100;
             // gpio_toggle(GPIOC, GPIO6);
             ad9833_set_freq_word(freqw);
+        }
+
+        static int32_t acc_ch0_cos = 0;
+        static int32_t acc_ch0_sin = 0;
+        static int32_t acc_ch1_cos = 0;
+        static int32_t acc_ch1_sin = 0;
+        static int32_t n = 0;
+
+        while(ddsli_output_ready()) {
+            ddsli_output_t output;
+            ddsli_output_pop(&output);
+
+            acc_ch0_cos += (int32_t)(output.chA[0]);
+            acc_ch0_sin += (int32_t)(output.chA[1]);
+            acc_ch1_cos += (int32_t)(output.chB[0]);
+            acc_ch1_sin += (int32_t)(output.chB[1]);
+            n++;
+
+            if(n >= 1000) {
+                acc_ch0_cos /= n;
+                acc_ch0_sin /= n;
+                acc_ch1_cos /= n;
+                acc_ch1_sin /= n;
+
+                uint8_t outbuf[128];
+                int s = snprintf((char*)outbuf, 128,
+                                 "CH0: %8d %8d | CH1: %8d %8d\r\n",
+                                 acc_ch0_cos, acc_ch0_sin,
+                                 acc_ch1_cos, acc_ch1_sin);
+                usbserial_send_tx(outbuf, s);
+
+                acc_ch0_cos = 0;
+                acc_ch0_sin = 0;
+                acc_ch1_cos = 0;
+                acc_ch1_sin = 0;
+                n = 0;
+            }
         }
 	}
 }

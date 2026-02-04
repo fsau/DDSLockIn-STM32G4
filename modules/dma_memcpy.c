@@ -98,4 +98,6 @@ bool dma_memcpy32(volatile uint32_t *dest, volatile uint32_t *src, uint32_t size
     
     // Start DMA transfer
     dma_enable_channel(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL);
+
+    return true;
 }
