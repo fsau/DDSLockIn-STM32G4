@@ -14,6 +14,7 @@
 #include "cordic.h"
 #include "adc.h"
 #include "dac.h"
+#include "dma_memcpy.h"
 
 // -----------------------------------------------------------------------------
 // Configuration
@@ -69,24 +70,25 @@ typedef struct {
     int16_t output_scale; // Additional scaling
 } dds_out_ctrl_t;
 
-// // Demodulation products for dual channel lock-in
-// typedef struct {
-//     int16_t ch0_cos;   // Channel 0 mixed with cos
-//     int16_t ch0_sin;   // Channel 0 mixed with sin  
-//     int16_t ch1_cos;   // Channel 1 mixed with cos
-//     int16_t ch1_sin;   // Channel 1 mixed with sin
-// } demod_products_t;
-
 uint32_t steps_counter = 0;
 
 // -----------------------------------------------------------------------------
 // Buffers & globals
 // -----------------------------------------------------------------------------
 
-volatile cordic_in_phase_t phase_buf[2 * HB_LEN];    // CPU → CORDIC
-volatile cordic_out_sample_t sincos_buf[3 * HB_LEN]; // CORDIC output: [cos0, sin0, cos1, sin1, ...]
-volatile dual_adc_sample_t dac_buf[2 * HB_LEN];               // CPU → DAC DMA
-volatile dual_adc_sample_t adc_buf[2 * HB_LEN];               // ADC DMA → CPU
+// #define SKIP_CPU_LC
+
+#ifdef SKIP_CPU_LC
+#define SINCOS_BUFF_HALFS 2
+#define dac_buf sincos_buf
+#else
+#define SINCOS_BUFF_HALFS 3
+volatile dual_adc_sample_t dac_buf[2 * HB_LEN];        
+#endif
+
+volatile cordic_in_phase_t phase_buf[2 * HB_LEN]; 
+volatile cordic_out_sample_t sincos_buf[SINCOS_BUFF_HALFS * HB_LEN]; 
+volatile dual_adc_sample_t adc_buf[2 * HB_LEN];             
 volatile dual_adc_sample_t adc_osci_out[6 * HB_LEN / 4];
 
 // LPF output FIFO (lower rate output)
@@ -113,7 +115,6 @@ volatile int *cordic_done_flag_ptr = NULL;
 volatile bool *cordic_busy_flag_ptr = NULL;
 
 uint32_t ddsli_current_half = 0; // 0 to 6
-bool dac_needs_restart = false;
 
 // -----------------------------------------------------------------------------
 // DDS Phase Control
@@ -125,9 +126,30 @@ static inline void dds_generate_phase_halfbuffer(
     uint32_t len
 )
 {
-    dds_phase_t phase = ctrl->phase;           // Q32.32
-    dds_phase_inc_t inc = ctrl->phase_inc;     // Q32.32
-    const dds_phase_inc_delta_t slope = ctrl->phase_inc_delta; // Q32.32
+    dds_phase_t phase = ctrl->phase;           
+    dds_phase_inc_t inc = ctrl->phase_inc;     
+    const dds_phase_inc_delta_t slope = ctrl->phase_inc_delta; 
+
+    for (uint32_t i = 0; i < len; i++) {
+        inc += slope;
+        phase += inc;
+        dst[i].amp = 0x6000;
+        dst[i].phase = phase >> 48;
+    }
+
+    ctrl->phase     = phase;
+    ctrl->phase_inc = inc;
+}
+
+static inline void dds_generate_phase_halfbuffer32(
+    dds_phase_ctrl_t *ctrl,
+    volatile cordic_in_phase_t *dst,
+    uint32_t len
+)
+{
+    int32_t phase = ctrl->phase >> 32;           
+    int32_t inc = ctrl->phase_inc >> 32;         
+    int32_t slope = ctrl->phase_inc_delta >> 32; 
 
     for (uint32_t i = 0; i < len; i++) {
         // Frequency sweep update
@@ -138,11 +160,11 @@ static inline void dds_generate_phase_halfbuffer(
         //   high 16 bits = amplitude
         //   low 16 bits = phase
         dst[i].amp = 0x6000;
-        dst[i].phase = phase >> 48;
+        dst[i].phase = phase >> 16;
     }
 
-    ctrl->phase     = phase;
-    ctrl->phase_inc = inc;
+    ctrl->phase     = (int64_t)phase << 32;
+    ctrl->phase_inc = (int64_t)inc << 32;
 }
 
 // Convenience wrapper for phase generation half-buffer processing
@@ -234,13 +256,24 @@ static inline void dds_process_linear_combination(
     }
 }
 
+// Simple copy
+static inline void dds_process_linear_combination_copy(
+    volatile cordic_out_sample_t *sincos_src,
+    volatile dual_adc_sample_t *dac_dest,
+    uint32_t len,
+    dds_out_ctrl_t *params
+)
+{
+    dma_memcpy32((uint32_t*)sincos_src,(uint32_t*)dac_dest, len);
+}
+
 // Convenience wrapper for half-buffer processing
 static inline void dds_process_dac_halfbuffer(uint32_t dac_half_idx, 
                                               uint32_t sincos_half_idx)
 {
     volatile cordic_out_sample_t *sincos_src = &sincos_buf[sincos_half_idx * HB_LEN];
-    volatile dual_adc_sample_t *dac_dest = &dac_buf[dac_half_idx * HB_LEN];
-    dds_process_linear_combination(sincos_src, dac_dest, HB_LEN, &dds_linear_comb);
+    volatile dual_adc_sample_t *dac_dest = (dual_adc_sample_t*)&dac_buf[dac_half_idx * HB_LEN];
+    dds_process_linear_combination_copy(sincos_src, dac_dest, HB_LEN, &dds_linear_comb);
 }
 
 // -----------------------------------------------------------------------------
@@ -253,6 +286,11 @@ static inline void dds_mix_adc_sincos(
     // volatile demod_products_t *demod_dest, // use fifo directly
     uint32_t len)
 {
+    int32_t acc_ch0_cos = 0;
+    int32_t acc_ch0_sin = 0;
+    int32_t acc_ch1_cos = 0;
+    int32_t acc_ch1_sin = 0;
+
     for (uint32_t i = 0; i < len; i++) {
         // Get dual ADC sample
         dual_adc_sample_t adc_sample = adc_src[i];
@@ -273,35 +311,23 @@ static inline void dds_mix_adc_sincos(
         int64_t prod_ch1_sin = (int64_t)adc_ch1 * sin_val;
         
         // Store to local buffer buffer
-        static int32_t acc_ch0_cos = 0;
-        static int32_t acc_ch0_sin = 0;
-        static int32_t acc_ch1_cos = 0;
-        static int32_t acc_ch1_sin = 0;
-        acc_ch0_cos += (int32_t)(prod_ch0_cos >> 16);
-        acc_ch0_sin += (int32_t)(prod_ch0_sin >> 16);
-        acc_ch1_cos += (int32_t)(prod_ch1_cos >> 16);
-        acc_ch1_sin += (int32_t)(prod_ch1_sin >> 16);
-        // Decimate and store to FIFO directly
-        if ((i+1) % 128 == 0) {
-            // Buffer has to be divisible by decimation factor
-            uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
-            // if (next_wr != lpf_fifo_rd) {
-            ddsli_output_t output = {0};
-            // Convert accumulated Q1.15 to float (-1.0 to +1.0)
-            float scale = 1.0f / (16 * 32768.0f);
-            output.chA[0] = (float)(acc_ch0_cos >> 16) * scale;
-            output.chA[1] = (float)(acc_ch0_sin >> 16) * scale;
-            output.chB[0] = (float)(acc_ch1_cos >> 16) * scale;
-            output.chB[1] = (float)(acc_ch1_sin >> 16) * scale;
-            lpf_fifo[lpf_fifo_wr] = output;
-            lpf_fifo_wr = next_wr;
-            // }
-            acc_ch0_cos = 0;
-            acc_ch0_sin = 0;
-            acc_ch1_cos = 0;
-            acc_ch1_sin = 0;
-        }
+        acc_ch0_cos += (int32_t)(prod_ch0_cos >> 32);
+        acc_ch0_sin += (int32_t)(prod_ch0_sin >> 32);
+        acc_ch1_cos += (int32_t)(prod_ch1_cos >> 32);
+        acc_ch1_sin += (int32_t)(prod_ch1_sin >> 32);
     }
+
+    ddsli_output_t output = {0};
+    float scale = 1.0f / (16 * 32768.0f);
+    output.chA[0] = (float)(acc_ch0_cos) * scale;
+    output.chA[1] = (float)(acc_ch0_sin) * scale;
+    output.chB[0] = (float)(acc_ch1_cos) * scale;
+    output.chB[1] = (float)(acc_ch1_sin) * scale;
+
+    // Store to FIFO directly
+    uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
+    lpf_fifo[lpf_fifo_wr] = output;
+    lpf_fifo_wr = next_wr;
 }
 
 // Convenience wrapper for half-buffer mixing
@@ -321,9 +347,7 @@ void ddsli_setup(void)
 {
     // Assumes ADC and DAC are triggered by same source (a timer, for
     // example) that is currently disabled, otherwise buffers will
-    // be unsynchronized. After setup you can turn them on as will.
-    // Seems to work fine, but another solution might be a ADC/DAC
-    // counter on ISR.
+    // be unsynchronized. After setup you can turn them on as needed.
 
     // Initialize peripherals.
     adc_dualcirc_dma_init((uint32_t *)adc_buf, 2 * HB_LEN);
@@ -370,6 +394,8 @@ void ddsli_setup(void)
                      (volatile uint32_t *)&sincos_buf[HB_LEN], 
                      HB_LEN);
     
+    dds_generate_phase_halfbuffer_idx(0);
+
     // Blocking wait for CORDIC completion only
     while (*cordic_busy_flag_ptr) {
         __asm__("nop");
@@ -403,7 +429,7 @@ bool ddsli_step_ready(void)
 
 bool ddsli_step(void)
 {
-    uint8_t sincos_thirds = ddsli_current_half % 3;
+    uint8_t sincos_thirds = ddsli_current_half % SINCOS_BUFF_HALFS;
     uint8_t buffers_half = ddsli_current_half % 2;
 
     // Check if DAC buffer is ready to be updated (half or full buffer played)
@@ -420,7 +446,7 @@ bool ddsli_step(void)
 
         // Process DAC half-buffer
         dds_process_dac_halfbuffer(buffers_half, sincos_thirds);
-        ddsli_current_half = (ddsli_current_half + 1) % 6;
+        ddsli_current_half = (ddsli_current_half + 1) % (2*SINCOS_BUFF_HALFS);
         return 2;
     }
     else if (*dac_half_flag_ptr)
@@ -446,7 +472,7 @@ bool ddsli_step(void)
     dds_generate_phase_halfbuffer_idx(buffers_half);
 
     // Mix ADC half-buffer with previous CORDIC output
-    dds_mix_adc_halfbuffer(buffers_half, ((sincos_thirds - 2) % 3)); 
+    dds_mix_adc_halfbuffer(buffers_half, ((sincos_thirds + 2) % SINCOS_BUFF_HALFS)); 
     
     return 1;
 }

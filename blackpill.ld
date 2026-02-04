@@ -84,22 +84,43 @@ SECTIONS
 		_ebss = .;
 	} >ram
 
+	/* --- CCM text (executable code) --- */
     .ccm_text :
     {
         . = ALIGN(4);
+        _sccm_text = .;
         *(.ccm_text*)
         . = ALIGN(4);
+        _eccm_text = .;
     } > ccm AT > rom
-
     _ccm_text_loadaddr = LOADADDR(.ccm_text);
-    _ccm_text_start    = ADDR(.ccm_text);
-    _ccm_text_end      = ADDR(.ccm_text) + SIZEOF(.ccm_text);
-
-    /* --- CCM data (no init image) --- */
-    .ccm_data (NOLOAD) :
+    
+    /* --- CCM data (initialized) --- */
+    .ccm_data :
     {
         . = ALIGN(4);
+        _sccm_data = .;
         *(.ccm_data*)
+        . = ALIGN(4);
+        _eccm_data = .;
+    } > ccm AT > rom
+    _ccm_data_loadaddr = LOADADDR(.ccm_data);
+    
+    /* --- CCM BSS (uninitialized) --- */
+    .ccm_bss (NOLOAD) :
+    {
+        . = ALIGN(4);
+        _sccm_bss = .;
+        *(.ccm_bss*)
+        . = ALIGN(4);
+        _eccm_bss = .;
+    } > ccm
+    
+    /* --- CCM noinit (not zeroed) --- */
+    .ccm_noinit (NOLOAD) :
+    {
+        . = ALIGN(4);
+        *(.ccm_noinit*)
         . = ALIGN(4);
     } > ccm
 

@@ -8,6 +8,7 @@
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/cm3/scb.h>
 
+#include "dma_memcpy.h"
 #include "usbserial.h"
 #include "adc.h"
 #include "spi.h"
@@ -222,6 +223,7 @@ int main(void)
                             GPIO6);
     gpio_set(GPIOC, GPIO6);
 
+    dma_memcpy_init();
     usbserial_init();
     spi_setup();
     ad9833_init();
