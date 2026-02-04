@@ -1,4 +1,5 @@
 #include "cordic.h"
+#include "utils.h"
 #include <stdlib.h>
 #include <string.h>
 #include <libopencm3/stm32/rcc.h>
@@ -7,8 +8,8 @@
 #include <libopencm3/stm32/dmamux.h>
 #include <libopencm3/stm32/g4/dmamux.h>
 #include <libopencm3/stm32/g4/rcc.h>
-#include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/g4/nvic.h>
+#include <libopencm3/cm3/scb.h>
 
 #define CORDIC_DMA_WRITE_CHANNEL DMA_CHANNEL3
 #define CORDIC_DMA_READ_CHANNEL  DMA_CHANNEL4
@@ -27,7 +28,7 @@ void cordic_init(void)
 
     /* configure CORDIC for 16-bit argument/result (returns packed 32-bit results) */
     cordic_set_function(CORDIC_CSR_FUNC_COS);
-    cordic_set_precision(CORDIC_CSR_PRECISION_ITER_08);
+    cordic_set_precision(CORDIC_CSR_PRECISION_ITER_20);
     cordic_set_argument_width_16bit();
     cordic_set_result_width_16bit();
     cordic_set_number_of_arguments_1();
@@ -80,17 +81,7 @@ int cordic_start_dma(volatile uint32_t *write_buf32, volatile uint32_t *read_buf
 
     /* enable transfer-complete interrupt on read channel and NVIC */
     dma_enable_transfer_complete_interrupt(DMA1, CORDIC_DMA_READ_CHANNEL);
-    /* enable NVIC for the selected DMA1 channel */
-    switch (CORDIC_DMA_READ_CHANNEL) {
-    case 1: nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ); break;
-    case 2: nvic_enable_irq(NVIC_DMA1_CHANNEL2_IRQ); break;
-    case 3: nvic_enable_irq(NVIC_DMA1_CHANNEL3_IRQ); break;
-    case 4: nvic_enable_irq(NVIC_DMA1_CHANNEL4_IRQ); break;
-    case 5: nvic_enable_irq(NVIC_DMA1_CHANNEL5_IRQ); break;
-    case 6: nvic_enable_irq(NVIC_DMA1_CHANNEL6_IRQ); break;
-    case 7: nvic_enable_irq(NVIC_DMA1_CHANNEL7_IRQ); break;
-    default: break;
-    }
+    dma_channel_enable_irq_with_priority(CORDIC_DMA_READ_CHANNEL, 0);
 
     /* enable cordic dma requests */
     cordic_enable_dma_write();
@@ -172,5 +163,6 @@ void dma1_channel1_isr(void) { }
 
         cordic_transfer_in_progress = 0;
         cordic_transfer_done++;
+        SCB_ICSR |= SCB_ICSR_PENDSVSET;
     }
 }

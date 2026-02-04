@@ -444,7 +444,7 @@ uint32_t usbserial_read_until(uint8_t* buffer, uint32_t max_len,
                               uint8_t terminator, uint32_t timeout_ms)
 {
     uint32_t bytes_read = 0;
-    uint32_t start_time = clock_ticks;
+    // uint32_t start_time = clock_ticks;
     uint8_t ch;
     
     while (bytes_read < max_len) {
@@ -459,7 +459,7 @@ uint32_t usbserial_read_until(uint8_t* buffer, uint32_t max_len,
         }
         
         // Reset timeout for next byte
-        start_time = clock_ticks;
+        // start_time = clock_ticks;
     }
     
     return bytes_read;

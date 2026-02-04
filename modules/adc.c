@@ -157,6 +157,9 @@ void adc_dualcirc_dma_init(void *buf, uint32_t len) {
     adc_calibrate(ADC1);
     adc_calibrate(ADC2);
 
+    adc_power_on(ADC1);
+    adc_power_on(ADC2);
+    
     for (volatile int i = 0; i < 10000; i++) __asm__("nop");
 
     /*  Configure ADC1 (Master) */
@@ -183,9 +186,9 @@ void adc_dualcirc_dma_init(void *buf, uint32_t len) {
     /*  Configure Dual Mode - Regular Simultaneous */
     adc_set_multi_mode(ADC1, ADC_CCR_DUAL_REGULAR_SIMUL);
     ADC_CCR(ADC1) |= ADC_CCR_MDMA_12_10_BIT;
-    
-    adc_power_on(ADC1);
-    adc_power_on(ADC2);
+
+    adc_enable_external_trigger_regular(ADC1,
+        ADC12_CFGR1_EXTSEL_TIM6_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
     
     /*  Configure DMA */
     dma_channel_reset(DMA1, DMA_CHANNEL1);
@@ -202,21 +205,18 @@ void adc_dualcirc_dma_init(void *buf, uint32_t len) {
     dma_set_memory_size(DMA1, DMA_CHANNEL1, DMA_CCR_MSIZE_32BIT);
     
     dma_set_priority(DMA1, DMA_CHANNEL1, DMA_CCR_PL_VERY_HIGH);
-    dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
 
     /* Route ADC1 DMA request to DMA1 Channel 1 */
+    dmamux_reset_dma_channel(DMAMUX1, DMA_CHANNEL1);
     dmamux_set_dma_channel_request(
         DMAMUX1,
         DMA_CHANNEL1,
         DMAMUX_CxCR_DMAREQ_ID_ADC1
     );
-
     dmamux_enable_request_generator(DMAMUX1, DMA_CHANNEL1);
-    
-    /*  Enable DMA for ADC1 */
-    adc_enable_dma(ADC1);
 
     // Enable transfer complete/half interrupt
+    dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
     dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL1);
     dma_enable_half_transfer_interrupt(DMA1, DMA_CHANNEL1);
     
@@ -225,10 +225,9 @@ void adc_dualcirc_dma_init(void *buf, uint32_t len) {
 
     dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_TCIF);
     dma_enable_channel(DMA1, DMA_CHANNEL1);
-    
-    adc_enable_external_trigger_regular(ADC1,
-        ADC12_CFGR1_EXTSEL_TIM6_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
 
+    /*  Enable DMA for ADC1 */
+    adc_enable_dma(ADC1);
     adc_start_conversion_regular(ADC1);
 }
 
@@ -364,5 +363,9 @@ void dma1_channel1_isr(void) {
         dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_HTIF);
         adc_capture_complete++;
         adc_capture_complete|=1;
+    }
+    if(ADC_ISR(ADC1) & ADC_ISR_EOS) {
+        ADC_ISR(ADC1) |= ADC_ISR_EOS;  // Clear flag
+        adc_start_conversion_regular(ADC1);  // Restart
     }
 }

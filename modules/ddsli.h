@@ -59,7 +59,7 @@
  *    - Output written to DAC buffer
  *    - CPU-triggered on half-buffer events
  *
- * 7. DMA memcpy
+ * 7. DMA memcpy NOT USED ANYMORE
  *    - Copies sin/cos buffer to secondary sin/cos buffer
  *
  * 8. CPU demodulator / mixer
@@ -76,11 +76,11 @@
  *     - Runs two half-buffers ahead
  *     - Written by CPU, read by CORDIC
  *
- * 11. Sin/cos buffer 1
+ * 11. Sin/cos buffer TRIPLE BUFFERED
  *     - Written by CORDIC DMA
  *     - Read by CPU linear combiner and DMA memcpy
  *
- * 12. Sin/cos buffer 2
+ * 12. Sin/cos buffer 2 NOT USED ANYMORE
  *     - Written by DMA memcpy
  *     - Read by demodulator
  *
@@ -143,7 +143,6 @@
  * --------------------------------------------------------------------------
  */
 
-
 /* --------------------------------------------------------------------------
  * Public output sample type
  * -------------------------------------------------------------------------- */
@@ -162,7 +161,7 @@ typedef struct {
 
 // Samples per half-buffer (total buffer size = 2 * HB_LEN * sizeof(type))
 #ifndef LEGACY_MODE
-#define HB_LEN 256U
+#define HB_LEN 128U
 #else
 #define HB_LEN 16
 #endif

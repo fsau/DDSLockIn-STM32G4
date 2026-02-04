@@ -130,7 +130,7 @@ void timers_trigger_init(void)
     rcc_periph_clock_enable(RCC_TIM3);  // Slave timer (DAC trigger)
     
     uint32_t timer_clk = 170000000;     // APB2 timer clock (170 MHz)
-    uint32_t adc_rate = 2000000;        // 2 MSa/s
+    uint32_t adc_rate = 500000;        // 2 MSa/s
     uint32_t prescaler = 0;             // no prescaler
     uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
     
@@ -163,8 +163,8 @@ void timers_trigger_init(void)
     // }
     
     /* Enable DAC trigger on update */
-    timer_update_on_any(TIM3);
-    timer_enable_update_event(TIM3);
+    // timer_update_on_any(TIM3);
+    // timer_enable_update_event(TIM3);
     // timer_set_dma_on_update_event(TIM3);
     
     /* Enable counter */
@@ -258,11 +258,9 @@ int main(void)
     uint8_t cmd_digits = 0;
 
 	while (1) {
-        ddsli_step();
         uint8_t buf[64];
         uint8_t len = usbserial_read_rx(buf, 64);
         // usbserial_send_tx(buf,len);
-        static uint32_t k = 0;
 
         for(uint32_t i = 0; i < len; i++)
         {
@@ -286,7 +284,7 @@ int main(void)
                         adc_capture_buffer(ch0, ch1);
                         usbserial_send_tx((uint8_t*)ch0, sizeof(ch0));
                         usbserial_send_tx((uint8_t*)ch1, sizeof(ch1));
-#endif                        
+#endif
                     }
                     else if(buf[i] == 'D' || buf[i] == 'd') {
                         // Jump to DFU bootloader
@@ -339,7 +337,7 @@ int main(void)
         if((clock_ticks/100) != lasttick)
         {
             lasttick = clock_ticks/100;
-            gpio_toggle(GPIOC, GPIO6);
+            // gpio_toggle(GPIOC, GPIO6);
             ad9833_set_freq_word(freqw);
         }
 	}

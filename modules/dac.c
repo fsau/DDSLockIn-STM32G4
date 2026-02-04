@@ -3,9 +3,11 @@
  */
 
 #include "dac.h"
+#include "utils.h"
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/dac.h>
+#include <libopencm3/cm3/scb.h>
 #include <libopencm3/stm32/dma.h>
 #include <libopencm3/stm32/dmamux.h>
 #include <libopencm3/stm32/timer.h>
@@ -49,35 +51,6 @@ void dac_init(void)
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
 }
 
-void tim6_dac13under_isr(void)
-{
-    /* Check channel1 DMA underrun */
-    if (DAC_SR(DAC_INSTANCE) & DAC_SR_DMAUDR1) {
-        /* clear underrun flag by writing 1 */
-        DAC_SR(DAC_INSTANCE) = DAC_SR_DMAUDR1;
-
-        dma_undr_flag = 1;
-
-        /* Stop DMA channel and clear flags */
-        dma_disable_channel(DMA1, DAC_DMA_CHANNEL);
-        dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_FLAGS);
-
-        /* Reprogram memory address/count from saved buffer and restart */
-        if (user_buf && user_len) {
-            dma_set_memory_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)user_buf);
-            dma_set_number_of_data(DMA1, DAC_DMA_CHANNEL, (uint16_t)user_len);
-            dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_FLAGS);
-            dma_enable_channel(DMA1, DAC_DMA_CHANNEL);
-
-            /* Ensure DAC DMA requests are enabled */
-            dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL);
-            dac_enable(DAC_INSTANCE, DAC_CHANNEL);
-
-            dac_running_flag = 1;
-        }
-    }
-}
-
 int dac_start(volatile uint32_t *samples, size_t length)
 {
     if (!samples || length == 0)
@@ -92,7 +65,7 @@ int dac_start(volatile uint32_t *samples, size_t length)
     /* Configure DMA1 channel for peripheral<-memory circular transfers */
     dma_channel_reset(DMA1, DAC_DMA_CHANNEL);
     dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_FLAGS);
-    dma_set_peripheral_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)&DAC_DHR12R1(DAC1));
+    dma_set_peripheral_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)&DAC_DHR12L1(DAC1));
     dma_set_memory_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)samples);
     dma_set_number_of_data(DMA1, DAC_DMA_CHANNEL, (uint16_t)length);
     dma_set_peripheral_size(DMA1, DAC_DMA_CHANNEL, DMA_CCR_PSIZE_32BIT);
@@ -112,16 +85,20 @@ int dac_start(volatile uint32_t *samples, size_t length)
     dma_enable_half_transfer_interrupt(DMA1, DAC_DMA_CHANNEL);
     dma_enable_transfer_complete_interrupt(DMA1, DAC_DMA_CHANNEL);
     dma_enable_transfer_error_interrupt(DMA1, DAC_DMA_CHANNEL);
-    switch (DAC_DMA_CHANNEL) {
-    case 1: nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ); break;
-    case 2: nvic_enable_irq(NVIC_DMA1_CHANNEL2_IRQ); break;
-    case 3: nvic_enable_irq(NVIC_DMA1_CHANNEL3_IRQ); break;
-    case 4: nvic_enable_irq(NVIC_DMA1_CHANNEL4_IRQ); break;
-    case 5: nvic_enable_irq(NVIC_DMA1_CHANNEL5_IRQ); break;
-    case 6: nvic_enable_irq(NVIC_DMA1_CHANNEL6_IRQ); break;
-    case 7: nvic_enable_irq(NVIC_DMA1_CHANNEL7_IRQ); break;
-    default: break;
-    }
+    // switch (DAC_DMA_CHANNEL) {
+    // case 1: nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ); break;
+    // case 2: nvic_enable_irq(NVIC_DMA1_CHANNEL2_IRQ); break;
+    // case 3: nvic_enable_irq(NVIC_DMA1_CHANNEL3_IRQ); break;
+    // case 4: nvic_enable_irq(NVIC_DMA1_CHANNEL4_IRQ); break;
+    // case 5: nvic_enable_irq(NVIC_DMA1_CHANNEL5_IRQ); break;
+    // case 6: nvic_enable_irq(NVIC_DMA1_CHANNEL6_IRQ); break;
+    // case 7: nvic_enable_irq(NVIC_DMA1_CHANNEL7_IRQ); break;
+    // default: break;
+    // }
+
+    dma_channel_enable_irq_with_priority(DAC_DMA_CHANNEL, 0);
+    nvic_set_priority(NVIC_PENDSV_IRQ, 0xFF);
+    nvic_enable_irq(NVIC_PENDSV_IRQ);
 
     /* Enable DMA channel */
     dma_enable_channel(DMA1, DAC_DMA_CHANNEL);
@@ -203,5 +180,35 @@ void dma1_channel1_isr(void) { }
         dac_dma_disable(DAC_INSTANCE, DAC_CHANNEL);
         dac_disable(DAC_INSTANCE, DAC_CHANNEL);
         dac_running_flag = 0;
+    }
+    SCB_ICSR |= SCB_ICSR_PENDSVSET;
+}
+
+void tim6_dac13under_isr(void)
+{
+    /* Check channel1 DMA underrun */
+    if (DAC_SR(DAC_INSTANCE) & DAC_SR_DMAUDR1) {
+        /* clear underrun flag by writing 1 */
+        DAC_SR(DAC_INSTANCE) = DAC_SR_DMAUDR1;
+
+        dma_undr_flag = 1;
+
+        /* Stop DMA channel and clear flags */
+        dma_disable_channel(DMA1, DAC_DMA_CHANNEL);
+        dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_FLAGS);
+
+        /* Reprogram memory address/count from saved buffer and restart */
+        if (user_buf && user_len) {
+            dma_set_memory_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)user_buf);
+            dma_set_number_of_data(DMA1, DAC_DMA_CHANNEL, (uint16_t)user_len);
+            dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_FLAGS);
+            dma_enable_channel(DMA1, DAC_DMA_CHANNEL);
+
+            /* Ensure DAC DMA requests are enabled */
+            dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL);
+            dac_enable(DAC_INSTANCE, DAC_CHANNEL);
+
+            dac_running_flag = 1;
+        }
     }
 }
