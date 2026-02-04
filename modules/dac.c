@@ -16,7 +16,6 @@
 
 /* Configuration choices - adapt if needed */
 #define DAC_INSTANCE DAC1
-#define DAC_CHANNEL DAC_CHANNEL1
 
 /* DMA channel used (choose appropriate DMA1 channel) */
 #define DAC_DMA_CHANNEL DMA_CHANNEL2
@@ -41,14 +40,15 @@ void dac_init(void)
 
     /* TIM6 expected running/configured by caller */
 
-    dac_set_mode(DAC_INSTANCE, DAC_MCR_MODE1_E_BUFF);
-    dac_disable(DAC_INSTANCE, DAC_CHANNEL);
-    dac_trigger_enable(DAC_INSTANCE, DAC_CHANNEL);
-    dac_set_trigger_source(DAC_INSTANCE, DAC_CR_TSEL1_T6);
-    dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL);
-    dac_set_mode(DAC1, DAC_MCR_SINFORMAT1);
+    dac_set_mode(DAC_INSTANCE, DAC_MCR_SINFORMAT1 | DAC_MCR_MODE1_E_BUFF |
+                               DAC_MCR_SINFORMAT2 | DAC_MCR_MODE2_E_BUFF);
+    dac_disable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
+    dac_trigger_enable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
+    dac_set_trigger_source(DAC_INSTANCE, DAC_CR_TSEL1_T6 | DAC_CR_TSEL2_T6);
+    dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL1);
     
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
+    gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO5);
 }
 
 int dac_start(volatile uint32_t *samples, size_t length)
@@ -65,7 +65,7 @@ int dac_start(volatile uint32_t *samples, size_t length)
     /* Configure DMA1 channel for peripheral<-memory circular transfers */
     dma_channel_reset(DMA1, DAC_DMA_CHANNEL);
     dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_FLAGS);
-    dma_set_peripheral_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)&DAC_DHR12L1(DAC1));
+    dma_set_peripheral_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)&DAC_DHR12LD(DAC1));
     dma_set_memory_address(DMA1, DAC_DMA_CHANNEL, (uint32_t)samples);
     dma_set_number_of_data(DMA1, DAC_DMA_CHANNEL, (uint16_t)length);
     dma_set_peripheral_size(DMA1, DAC_DMA_CHANNEL, DMA_CCR_PSIZE_32BIT);
@@ -85,27 +85,14 @@ int dac_start(volatile uint32_t *samples, size_t length)
     dma_enable_half_transfer_interrupt(DMA1, DAC_DMA_CHANNEL);
     dma_enable_transfer_complete_interrupt(DMA1, DAC_DMA_CHANNEL);
     dma_enable_transfer_error_interrupt(DMA1, DAC_DMA_CHANNEL);
-    // switch (DAC_DMA_CHANNEL) {
-    // case 1: nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ); break;
-    // case 2: nvic_enable_irq(NVIC_DMA1_CHANNEL2_IRQ); break;
-    // case 3: nvic_enable_irq(NVIC_DMA1_CHANNEL3_IRQ); break;
-    // case 4: nvic_enable_irq(NVIC_DMA1_CHANNEL4_IRQ); break;
-    // case 5: nvic_enable_irq(NVIC_DMA1_CHANNEL5_IRQ); break;
-    // case 6: nvic_enable_irq(NVIC_DMA1_CHANNEL6_IRQ); break;
-    // case 7: nvic_enable_irq(NVIC_DMA1_CHANNEL7_IRQ); break;
-    // default: break;
-    // }
 
     dma_channel_enable_irq_with_priority(DAC_DMA_CHANNEL, 0);
-    nvic_set_priority(NVIC_PENDSV_IRQ, 0xFF);
-    nvic_enable_irq(NVIC_PENDSV_IRQ);
 
     /* Enable DMA channel */
     dma_enable_channel(DMA1, DAC_DMA_CHANNEL);
 
     /* Enable DAC; TIM6 is expected to provide TRGO externally */
-    dac_enable(DAC_INSTANCE, DAC_CHANNEL);
-    dac_load_data_buffer_single(DAC1,0x400, DAC_ALIGN_RIGHT12, DAC_CHANNEL1);
+    dac_enable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
 
     nvic_enable_irq(NVIC_TIM6_DAC13UNDER_IRQ);
 
@@ -126,8 +113,8 @@ void dac_stop(void)
 
     dma_disable_channel(DMA1, DAC_DMA_CHANNEL);
     dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_FLAGS);
-    dac_dma_disable(DAC_INSTANCE, DAC_CHANNEL);
-    dac_disable(DAC_INSTANCE, DAC_CHANNEL);
+    dac_dma_disable(DAC_INSTANCE, DAC_CHANNEL1);
+    dac_disable(DAC_INSTANCE, DAC_CHANNEL1);
     /* Do not stop TIM6 here; it may be used by other peripherals */
     dac_running_flag = 0;
 }
@@ -177,8 +164,8 @@ void dma1_channel1_isr(void) { }
 
         /* try to stop gracefully */
         dma_disable_channel(DMA1, DAC_DMA_CHANNEL);
-        dac_dma_disable(DAC_INSTANCE, DAC_CHANNEL);
-        dac_disable(DAC_INSTANCE, DAC_CHANNEL);
+        dac_dma_disable(DAC_INSTANCE, DAC_CHANNEL1);
+        dac_disable(DAC_INSTANCE, DAC_CHANNEL1);
         dac_running_flag = 0;
     }
     SCB_ICSR |= SCB_ICSR_PENDSVSET;
@@ -205,8 +192,8 @@ void tim6_dac13under_isr(void)
             dma_enable_channel(DMA1, DAC_DMA_CHANNEL);
 
             /* Ensure DAC DMA requests are enabled */
-            dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL);
-            dac_enable(DAC_INSTANCE, DAC_CHANNEL);
+            dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL1);
+            dac_enable(DAC_INSTANCE, DAC_CHANNEL1);
 
             dac_running_flag = 1;
         }

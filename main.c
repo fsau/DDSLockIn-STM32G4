@@ -130,7 +130,7 @@ void timers_trigger_init(void)
     rcc_periph_clock_enable(RCC_TIM3);  // Slave timer (DAC trigger)
     
     uint32_t timer_clk = 170000000;     // APB2 timer clock (170 MHz)
-    uint32_t adc_rate = 500000;        // 2 MSa/s
+    uint32_t adc_rate = 1000000;        // 2 MSa/s
     uint32_t prescaler = 0;             // no prescaler
     uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
     
@@ -179,7 +179,8 @@ void timers_trigger_init(void)
     timer_enable_oc_output(TIM3, TIM_OC3);
 }
 
-void jump_to_dfu(void) {
+void jump_to_dfu(void)
+{
     usbserial_disconnect();
     nvic_disable_irq(NVIC_SYSTICK_IRQ);
 
@@ -257,7 +258,8 @@ int main(void)
     uint32_t cmd_value = 0;
     uint8_t cmd_digits = 0;
 
-	while (1) {
+	while (1)
+    {
         uint8_t buf[64];
         uint8_t len = usbserial_read_rx(buf, 64);
         // usbserial_send_tx(buf,len);
