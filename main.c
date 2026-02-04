@@ -260,6 +260,8 @@ int main(void)
     uint32_t cmd_value = 0;
     uint8_t cmd_digits = 0;
 
+    while(clock_ticks<300);
+
 	while (1)
     {
         uint8_t buf[64];
@@ -361,7 +363,7 @@ int main(void)
             acc_ch1_sin += (int32_t)(output.chB[1]);
             n++;
 
-            if(n >= 1000) {
+            if(n >= 300) {
                 acc_ch0_cos /= n;
                 acc_ch0_sin /= n;
                 acc_ch1_cos /= n;
@@ -369,7 +371,7 @@ int main(void)
 
                 uint8_t outbuf[128];
                 int s = snprintf((char*)outbuf, 128,
-                                 "CH0: %8d %8d | CH1: %8d %8d\r\n",
+                                 "%6d %6d %6d %6d\r\n",
                                  acc_ch0_cos, acc_ch0_sin,
                                  acc_ch1_cos, acc_ch1_sin);
                 usbserial_send_tx(outbuf, s);

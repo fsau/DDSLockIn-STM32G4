@@ -300,10 +300,10 @@ static inline void dds_mix_adc_sincos(
         int16_t sin_val = (sincos_src[i].sin);  // sin
         
         // Multiply and store to local buffer buffer
-        acc_ch0_cos += ((int32_t)adc_ch0 * cos_val)>>16;
-        acc_ch0_sin += ((int32_t)adc_ch0 * sin_val)>>16;
-        acc_ch1_cos += ((int32_t)adc_ch1 * cos_val)>>16;
-        acc_ch1_sin += ((int32_t)adc_ch1 * sin_val)>>16;
+        acc_ch0_cos += ((int32_t)adc_ch0 * cos_val)>>12;
+        acc_ch0_sin += ((int32_t)adc_ch0 * sin_val)>>12;
+        acc_ch1_cos += ((int32_t)adc_ch1 * cos_val)>>12;
+        acc_ch1_sin += ((int32_t)adc_ch1 * sin_val)>>12;
     }
 
     ddsli_output_t output = {0};
