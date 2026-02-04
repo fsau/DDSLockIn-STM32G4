@@ -206,6 +206,38 @@ void jump_to_dfu(void)
     while(1);
 }
 
+uint8_t print_int_str(uint8_t *buf, uint16_t len, int64_t value)
+{
+    uint8_t pos = len-1, sign = 0;
+
+    if(value < 0) {
+        sign = 1;
+        value = -value;
+    }
+
+    if(value == 0) {
+        buf[0] = '0';
+        return 1;
+    }
+
+    while(value && pos)
+    {
+        buf[pos--] = '0' + (value % 10);
+        value /= 10;
+    }
+
+    if(sign && pos) {
+        buf[pos--] = '-';
+    }
+
+    for(uint8_t i = 0; i < len - 1 - pos; i++)
+    {
+        buf[i] = buf[pos + 1 + i];
+    }
+
+    return len - 1 - pos;
+}
+
 int main(void)
 {
     SCB_VTOR = 0x08000000;
@@ -260,127 +292,134 @@ int main(void)
     uint32_t cmd_value = 0;
     uint8_t cmd_digits = 0;
 
-    while(clock_ticks<300);
+    while(clock_ticks<300) __asm__("nop");
 
 	while (1)
     {
         uint8_t buf[64];
         uint8_t len = usbserial_read_rx(buf, 64);
-        // usbserial_send_tx(buf,len);
+//         // usbserial_send_tx(buf,len);
 
-        for(uint32_t i = 0; i < len; i++)
-        {
-            switch(cmd_state) {
-                case CMD_IDLE:
-                    if(buf[i] == 'F' || buf[i] == 'f') {
-                        // Start frequency command
-                        cmd_state = CMD_FREQ;
-                        cmd_value = 0;
-                        cmd_digits = 0;
-                    }
-                    else if(buf[i] == 'A' || buf[i] == 'a') {
-                        // Start dpot command
-                        cmd_state = CMD_DPOT;
-                        cmd_value = 0;
-                        cmd_digits = 0;
-                    }
-                    else if(buf[i] == 'M' || buf[i] == 'm') {
-// #ifdef LEGACY_MODE                    
-//                         // ADC capture command (immediate)
-//                         adc_capture_buffer(ch0, ch1);
-//                         usbserial_send_tx((uint8_t*)ch0, sizeof(ch0));
-//                         usbserial_send_tx((uint8_t*)ch1, sizeof(ch1));
-// #endif
-                    }
-                    else if(buf[i] == 'D' || buf[i] == 'd') {
-                        // Jump to DFU bootloader
-                        jump_to_dfu();
-                    }
-                    // Add other immediate commands here if needed
-                    break;
+//         for(uint32_t i = 0; i < len; i++)
+//         {
+//             switch(cmd_state) {
+//                 case CMD_IDLE:
+//                     if(buf[i] == 'F' || buf[i] == 'f') {
+//                         // Start frequency command
+//                         cmd_state = CMD_FREQ;
+//                         cmd_value = 0;
+//                         cmd_digits = 0;
+//                     }
+//                     else if(buf[i] == 'A' || buf[i] == 'a') {
+//                         // Start dpot command
+//                         cmd_state = CMD_DPOT;
+//                         cmd_value = 0;
+//                         cmd_digits = 0;
+//                     }
+//                     else if(buf[i] == 'M' || buf[i] == 'm') {
+// // #ifdef LEGACY_MODE                    
+// //                         // ADC capture command (immediate)
+// //                         adc_capture_buffer(ch0, ch1);
+// //                         usbserial_send_tx((uint8_t*)ch0, sizeof(ch0));
+// //                         usbserial_send_tx((uint8_t*)ch1, sizeof(ch1));
+// // #endif
+//                     }
+//                     else if(buf[i] == 'D' || buf[i] == 'd') {
+//                         // Jump to DFU bootloader
+//                         jump_to_dfu();
+//                     }
+//                     // Add other immediate commands here if needed
+//                     break;
                     
-                case CMD_FREQ:
-                    if(buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 10) {
-                        // Accumulate digits
-                        cmd_value = cmd_value * 10 + (buf[i] - '0');
-                        cmd_digits++;
-                    } else {
-                        // Non-digit or max digits reached - execute command
-                        freqw = cmd_value;
-                        ad9833_set_freq_word(freqw);
+//                 case CMD_FREQ:
+//                     if(buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 10) {
+//                         // Accumulate digits
+//                         cmd_value = cmd_value * 10 + (buf[i] - '0');
+//                         cmd_digits++;
+//                     } else {
+//                         // Non-digit or max digits reached - execute command
+//                         freqw = cmd_value;
+//                         ad9833_set_freq_word(freqw);
                         
-                        // Reset to idle state
-                        cmd_state = CMD_IDLE;
-                        cmd_value = 0;
-                        cmd_digits = 0;
+//                         // Reset to idle state
+//                         cmd_state = CMD_IDLE;
+//                         cmd_value = 0;
+//                         cmd_digits = 0;
                         
-                        // Optional: send confirmation
-                        // uint8_t confirm_buf[32];
-                        // uint8_t s = snprintf(confirm_buf, 32, "Freq set to %lu\r\n", freqw);
-                        // usbserial_send_tx(confirm_buf, s);
-                    }
-                    break;
+//                         // Optional: send confirmation
+//                         // uint8_t confirm_buf[32];
+//                         // uint8_t s = snprintf(confirm_buf, 32, "Freq set to %lu\r\n", freqw);
+//                         // usbserial_send_tx(confirm_buf, s);
+//                     }
+//                     break;
                     
-                case CMD_DPOT:
-                    if(buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 3) {
-                        // Accumulate digits (max 3 digits for 0-100)
-                        cmd_value = cmd_value * 10 + (buf[i] - '0');
-                        cmd_digits++;
-                    } else {
-                        // Non-digit or max digits reached - execute command
-                        if(cmd_value > 100) cmd_value = 100; // Clamp to max
-                        dpot_set((uint8_t)cmd_value);
+//                 case CMD_DPOT:
+//                     if(buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 3) {
+//                         // Accumulate digits (max 3 digits for 0-100)
+//                         cmd_value = cmd_value * 10 + (buf[i] - '0');
+//                         cmd_digits++;
+//                     } else {
+//                         // Non-digit or max digits reached - execute command
+//                         if(cmd_value > 100) cmd_value = 100; // Clamp to max
+//                         dpot_set((uint8_t)cmd_value);
                         
-                        // Reset to idle state
-                        cmd_state = CMD_IDLE;
-                        cmd_value = 0;
-                        cmd_digits = 0;
-                    }
-                    break;
-            }
-        }
+//                         // Reset to idle state
+//                         cmd_state = CMD_IDLE;
+//                         cmd_value = 0;
+//                         cmd_digits = 0;
+//                     }
+//                     break;
+//             }
+//         }
 
-        if((clock_ticks/100) != lasttick)
+        if((clock_ticks/10) != lasttick)
         {
-            lasttick = clock_ticks/100;
+            lasttick = clock_ticks/10;
             // gpio_toggle(GPIOC, GPIO6);
             ad9833_set_freq_word(freqw);
-        }
 
-        static int32_t acc_ch0_cos = 0;
-        static int32_t acc_ch0_sin = 0;
-        static int32_t acc_ch1_cos = 0;
-        static int32_t acc_ch1_sin = 0;
-        static int32_t n = 0;
+            static int64_t acc_ch0_cos = 0;
+            static int64_t acc_ch0_sin = 0;
+            static int64_t acc_ch1_cos = 0;
+            static int64_t acc_ch1_sin = 0;
+            static int64_t n = 0;
 
-        while(ddsli_output_ready()) {
-            ddsli_output_t output;
-            ddsli_output_pop(&output);
+            while(ddsli_output_ready()) {
+                ddsli_output_t output;
+                ddsli_output_pop(&output);
 
-            acc_ch0_cos += (int32_t)(output.chA[0]);
-            acc_ch0_sin += (int32_t)(output.chA[1]);
-            acc_ch1_cos += (int32_t)(output.chB[0]);
-            acc_ch1_sin += (int32_t)(output.chB[1]);
-            n++;
+                acc_ch0_cos += output.chA[0];
+                acc_ch0_sin += output.chA[1];
+                acc_ch1_cos += output.chB[0];
+                acc_ch1_sin += output.chB[1];
+                n++;
 
-            if(n >= 300) {
-                acc_ch0_cos /= n;
-                acc_ch0_sin /= n;
-                acc_ch1_cos /= n;
-                acc_ch1_sin /= n;
+                if(n >= 300) {
+                    // acc_ch0_cos /= n;
+                    // acc_ch0_sin /= n;
+                    // acc_ch1_cos /= n;
+                    // acc_ch1_sin /= n;
 
-                uint8_t outbuf[128];
-                int s = snprintf((char*)outbuf, 128,
-                                 "%6d %6d %6d %6d\r\n",
-                                 acc_ch0_cos, acc_ch0_sin,
-                                 acc_ch1_cos, acc_ch1_sin);
-                usbserial_send_tx(outbuf, s);
+                    // uint8_t outbuf[80];
+                    // uint8_t s1 = print_int_str(outbuf, 20, acc_ch0_cos);
+                    // uint8_t s2 = print_int_str(outbuf + s1 + 2, 20, acc_ch0_sin);
+                    // uint8_t s3 = print_int_str(outbuf + s1 + s2 + 4, 20, acc_ch1_cos);
+                    // uint8_t s4 = print_int_str(outbuf + s1 + s2 + s3 + 6, 20, acc_ch1_sin);
+                    // outbuf[s1] = ',';
+                    // outbuf[s1 + s2 + 1] = ',';
+                    // outbuf[s1 + s2 + s3 + 2] = ',';
+                    // uint8_t s = s1 + s2 + s3 + s4;
+                    // outbuf[s] = '\r';
+                    // outbuf[s + 1] = '\n';
+                        
+                    // usbserial_send_tx(outbuf, s+8);
 
-                acc_ch0_cos = 0;
-                acc_ch0_sin = 0;
-                acc_ch1_cos = 0;
-                acc_ch1_sin = 0;
-                n = 0;
+                    acc_ch0_cos = 0;
+                    acc_ch0_sin = 0;
+                    acc_ch1_cos = 0;
+                    acc_ch1_sin = 0;
+                    n = 0;
+                }
             }
         }
 	}

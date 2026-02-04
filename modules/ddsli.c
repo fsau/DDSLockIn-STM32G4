@@ -35,16 +35,10 @@ typedef struct {
 typedef union {
     uint32_t raw;
     struct {
-        int16_t adc1_data;  // Channel 0 (ADC1), 12-bit right-aligned
-        int16_t adc2_data;  // Channel 1 (ADC2), 12-bit right-aligned
+        uint16_t adc1_data;  // Channel 0 (ADC1), 12-bit right-aligned
+        uint16_t adc2_data;  // Channel 1 (ADC2), 12-bit right-aligned
     };
 } dual_adc_sample_t;
-
-// Compressed 12 bit samples for oscilloscope output
-// 4 samples in 3×32 bits, 25% less memory
-typedef union {
-    uint32_t data[3];
-} dual_adc_compressed_t;
 
 typedef union {
     uint32_t raw;
@@ -61,6 +55,12 @@ typedef union {
         int16_t sin;
     };
 } cordic_out_sample_t;
+
+// Compressed 12 bit samples for oscilloscope output
+// 4 samples in 3×32 bits, 25% less memory
+typedef union {
+    uint32_t data[3];
+} dual_adc_compressed_t;
 
 typedef struct {
     int16_t A1;           // Coefficient for sin (Q1.15)
@@ -220,7 +220,6 @@ static inline void dds_process_linear_combination(
         int64_t combined1 = (int64_t)A1 * sin_val + (int64_t)B1 * cos_val;
         int64_t combined2 = (int64_t)A2 * sin_val + (int64_t)B2 * cos_val;
 
-
         // Apply scaling if needed
         if (scale != 1) {
             combined1 = (combined1 * scale) >> 15; // Q1.15 scaling
@@ -285,36 +284,32 @@ static inline void dds_mix_adc_sincos(
     volatile cordic_out_sample_t *sincos_src,
     uint32_t len)
 {
-    int32_t acc_ch0_cos = 0;
-    int32_t acc_ch0_sin = 0;
-    int32_t acc_ch1_cos = 0;
-    int32_t acc_ch1_sin = 0;
+    int64_t acc_ch0_cos = 0;
+    int64_t acc_ch0_sin = 0;
+    int64_t acc_ch1_cos = 0;
+    int64_t acc_ch1_sin = 0;
 
     for (uint32_t i = 0; i < len; i++) {
         // Convert ADC to signed offset binary 
-        int16_t adc_ch0 = adc_src[i].adc1_data - 2048; 
-        int16_t adc_ch1 = adc_src[i].adc2_data - 2048;
+        int32_t adc_ch0 = ((adc_src[i].adc1_data)-0x800);
+        int32_t adc_ch1 = ((adc_src[i].adc2_data)-0x800);
         
         // Get sincos values (Q1.15)
-        int16_t cos_val = (sincos_src[i].cos);  // cos
-        int16_t sin_val = (sincos_src[i].sin);  // sin
+        int32_t cos_val = 0xFFFF&(sincos_src[i].cos);  // cos
+        int32_t sin_val = 0xFFFF&(sincos_src[i].sin);  // sin
         
         // Multiply and store to local buffer buffer
-        acc_ch0_cos += ((int32_t)adc_ch0 * cos_val)>>12;
-        acc_ch0_sin += ((int32_t)adc_ch0 * sin_val)>>12;
-        acc_ch1_cos += ((int32_t)adc_ch1 * cos_val)>>12;
-        acc_ch1_sin += ((int32_t)adc_ch1 * sin_val)>>12;
+        acc_ch0_cos += ((int64_t)adc_ch0 * cos_val)>>16;
+        acc_ch0_sin += ((int64_t)adc_ch0 * sin_val)>>16;
+        acc_ch1_cos += ((int64_t)adc_ch1 * cos_val)>>16;
+        acc_ch1_sin += ((int64_t)adc_ch1 * sin_val)>>16;
     }
 
-    ddsli_output_t output = {0};
-    output.chA[0] = acc_ch0_cos;
-    output.chA[1] = acc_ch0_sin;
-    output.chB[0] = acc_ch1_cos;
-    output.chB[1] = acc_ch1_sin;
-
-    // Store to FIFO directly
     uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
-    lpf_fifo[lpf_fifo_wr] = output;
+    lpf_fifo[lpf_fifo_wr].chA[0] = acc_ch0_cos;
+    lpf_fifo[lpf_fifo_wr].chA[1] = acc_ch0_sin;
+    lpf_fifo[lpf_fifo_wr].chB[0] = acc_ch1_cos;
+    lpf_fifo[lpf_fifo_wr].chB[1] = acc_ch1_sin;
     lpf_fifo_wr = next_wr;
 }
 
@@ -324,7 +319,7 @@ static inline void dds_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sincos
     volatile dual_adc_sample_t *adc_src = &adc_buf[adc_half_idx * HB_LEN];
     volatile cordic_out_sample_t *sincos_src = &sincos_buf[sincos_offset * HB_LEN];
     
-    dds_mix_adc_sincos(adc_src, (void*)adc_src, HB_LEN);
+    dds_mix_adc_sincos(adc_src, sincos_src, HB_LEN);
 }
 
 // -----------------------------------------------------------------------------
@@ -458,12 +453,10 @@ bool ddsli_step(void)
     }
     else if (*dac_half_flag_ptr)
     {
-        ddsli_current_half |= 1;
         (*dac_half_flag_ptr)--;
     }
     else if (*dac_full_flag_ptr)
     {
-        ddsli_current_half &= ~1;
         (*dac_full_flag_ptr)--;
     }
 
