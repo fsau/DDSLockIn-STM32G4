@@ -8,6 +8,7 @@
 
 volatile uint32_t adc_buffer[ADC_BUF_LEN];
 volatile uint32_t adc_capture_complete = 0;
+volatile uint32_t adc_capture_counter = 0;
 
 void adc_dual_dma_init(void) {
     rcc_periph_clock_enable(RCC_GPIOA);
@@ -357,12 +358,13 @@ void dma1_channel1_isr(void) {
     if (dma_get_interrupt_flag(DMA1, DMA_CHANNEL1, DMA_TCIF)) {
         dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_TCIF);
         adc_capture_complete++;
-        adc_capture_complete&=~1;
+        adc_capture_counter+=2;
+        adc_capture_counter&=~1;
     }
     if (dma_get_interrupt_flag(DMA1, DMA_CHANNEL1, DMA_HTIF)) {
         dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_HTIF);
-        adc_capture_complete++;
-        adc_capture_complete|=1;
+        adc_capture_counter+=2;
+        adc_capture_counter|=1;
     }
     if(ADC_ISR(ADC1) & ADC_ISR_EOS) {
         ADC_ISR(ADC1) |= ADC_ISR_EOS;  // Clear flag

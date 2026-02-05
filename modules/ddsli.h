@@ -151,8 +151,8 @@
 typedef struct {
     float frequency;
     uint16_t dds_amplitude;
-    int32_t chA[2];
-    int32_t chB[2];
+    float chA[3];
+    float chB[3];
 } ddsli_output_t;
 
 /* --------------------------------------------------------------------------

@@ -28,7 +28,8 @@ static size_t user_len = 0;
 volatile int dac_half_flag = 0;
 volatile int dac_full_flag = 0;
 volatile int dac_err_flag = 0;
-volatile int dma_undr_flag = 0;
+volatile int dac_undr_flag = 0;
+volatile uint32_t dac_buff_count = 0;  // do not decrement
 
 void dac_init(void)
 {
@@ -36,9 +37,9 @@ void dac_init(void)
     rcc_periph_clock_enable(RCC_DAC1);
     rcc_periph_clock_enable(RCC_DMAMUX1);
     rcc_periph_clock_enable(RCC_DMA1);
-    rcc_periph_clock_enable(RCC_TIM6);
+    rcc_periph_clock_enable(RCC_TIM3);
 
-    /* TIM6 expected running/configured by caller */
+    /* TIM3 expected running/configured by caller */
 
     dac_set_mode(DAC_INSTANCE, DAC_MCR_SINFORMAT1 | DAC_MCR_MODE1_E_BUFF |
                                DAC_MCR_SINFORMAT2 | DAC_MCR_MODE2_E_BUFF);
@@ -149,12 +150,16 @@ void dma1_channel1_isr(void) { }
     if (dma_get_interrupt_flag(DMA1, DAC_DMA_CHANNEL, DMA_HTIF)) {
         dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_HTIF);
         dac_half_flag++;
+        dac_buff_count+=2;
+        dac_buff_count|=1;
     }
 
     /* Transfer complete (end of buffer) */
     if (dma_get_interrupt_flag(DMA1, DAC_DMA_CHANNEL, DMA_TCIF)) {
         dma_clear_interrupt_flags(DMA1, DAC_DMA_CHANNEL, DMA_TCIF);
         dac_full_flag++;
+        dac_buff_count+=2;
+        dac_buff_count&=~1;
     }
 
     /* Transfer error */
@@ -178,7 +183,7 @@ void tim6_dac13under_isr(void)
         /* clear underrun flag by writing 1 */
         DAC_SR(DAC_INSTANCE) = DAC_SR_DMAUDR1;
 
-        dma_undr_flag = 1;
+        dac_undr_flag = 1;
 
         /* Stop DMA channel and clear flags */
         dma_disable_channel(DMA1, DAC_DMA_CHANNEL);
