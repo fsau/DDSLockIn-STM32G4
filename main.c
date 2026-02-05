@@ -322,7 +322,7 @@ int main(void)
                         jump_to_dfu();
                     }
                     else if(buf[i] == 'S' || buf[i] == 's') {
-                        stop_adc_dac_timer();
+                        // stop_adc_dac_timer();
                     }
                     break;
                 case CMD_FREQ:

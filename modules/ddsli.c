@@ -439,7 +439,8 @@ static inline void dds_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sincos
     volatile dual_adc_sample_t *adc_src = &adc_buf[((adc_half_idx)%2) * HB_LEN];
     volatile cordic_out_sample_t *sincos_src = &sincos_buf[((sincos_offset)%SINCOS_BUFF_HALVES) * HB_LEN];
     
-    dds_capt_adc_sincos(adc_src, sincos_src, HB_LEN);
+    dds_mix_adc_sincos(adc_src, sincos_src, HB_LEN);
+    // dds_capt_adc_sincos(adc_src, sincos_src, HB_LEN);
 }
 
 // -----------------------------------------------------------------------------
