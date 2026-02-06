@@ -36,6 +36,7 @@ Todo
 - DDS/Lock-in base done, missing some things (see `ddsli.c`).
 - PLL and application code for controlling the DDS/Lock-in for measurements.
 - Fixing the USB CDC/ADC interface.
+- Update `sweepgui` to use the DDS/lock-in.
 
 GUI Screenshot
 
