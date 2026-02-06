@@ -99,8 +99,6 @@ void adc_dual_dma_sigleshot_init(void) {
         DMA_CHANNEL1,
         DMAMUX_CxCR_DMAREQ_ID_ADC1
     );
-
-    dmamux_enable_request_generator(DMAMUX1, DMA_CHANNEL1);
     
     /* No synchronization, no request generator */
     // dmamux_disable_dma_request_sync(DMAMUX1, DMA_CHANNEL1);

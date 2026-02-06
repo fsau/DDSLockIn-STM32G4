@@ -21,7 +21,7 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len);
 /* Capture one buffer of ADC1 and ADC2 data (blocking) */
 void adc_capture_singleshot_buffer(uint16_t *adc1_data, uint16_t *adc2_data);
 
-/* Start continuous mode (free-running) */
+/* Start continuous mode */
 void adc_start_continuous_mode(void);
 
 /* Stop continuous mode */

@@ -80,7 +80,7 @@ int dac_start(volatile uint32_t *samples, size_t length)
 
     /* Configure DMAMUX to route D'MA channel to DAC request */
     dmamux_reset_dma_channel(DMAMUX1, DAC_DMAMUX_CHANNEL);
-    dmamux_set_dma_channel_request(DMAMUX1, DAC_DMAMUX_CHANNEL, DMAMUX_CxCR_DMAREQ_ID_ADC1);
+    dmamux_set_dma_channel_request(DMAMUX1, DAC_DMAMUX_CHANNEL, DMAMUX_CxCR_DMAREQ_ID_DAC1_CH1);
 
     /* Enable DMA interrupts (HT, TC, TE) and NVIC for the channel */
     dma_enable_half_transfer_interrupt(DMA1, DAC_DMA_CHANNEL);

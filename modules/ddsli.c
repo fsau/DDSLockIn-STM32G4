@@ -6,6 +6,17 @@
  * ADC and DAC run continuously via DMA, CPU processes completed half-buffers.
  */
 
+ /*
+    TODO:
+
+    - Add residuals to demod (1 or per basis?)
+    - Change timers triggers to two timers:
+        - ADC (slave) after DAC (master), adjustable timing
+        - Check what's causing phase offset, is it only timing?
+    - Fix half-buffer flags & DMA interrupts: flags for every buffer piece
+    - ADC/sincos capture buffers for oscilloscope view/diagnostics
+ */
+
 #include "ddsli.h"
 #include <stdint.h>
 #include <libopencm3/cm3/scb.h>
@@ -18,7 +29,7 @@
 #include "dma_memcpy.h"
 
 // -----------------------------------------------------------------------------
-// Configuration
+// Type definitions
 // -----------------------------------------------------------------------------
 
 // int32 full-scale (2^31) corresponds to pi radians, range: [-pi, +pi)
@@ -76,6 +87,7 @@ typedef struct {
 // -----------------------------------------------------------------------------
 
 // #define SKIP_CPU_LC
+
 #define CAPT_BUFF_HALVES 4
 volatile dual_adc_sample_t adc_captbuf[CAPT_BUFF_HALVES * HB_LEN];             
 volatile cordic_out_sample_t sincos_captbuf[CAPT_BUFF_HALVES * HB_LEN]; 
@@ -87,18 +99,15 @@ volatile cordic_out_sample_t sincos_captbuf[CAPT_BUFF_HALVES * HB_LEN];
 #define SINCOS_BUFF_HALVES 3
 volatile dual_adc_sample_t dac_buf[2 * HB_LEN];        
 #endif
-
 volatile cordic_in_phase_t phase_buf[2 * HB_LEN]; 
 volatile cordic_out_sample_t sincos_buf[SINCOS_BUFF_HALVES * HB_LEN]; 
 volatile dual_adc_sample_t adc_buf[2 * HB_LEN];             
-
-// LPF output FIFO (lower rate output)
 #define LPF_FIFO_LEN 1U
 volatile ddsli_output_t lpf_fifo[LPF_FIFO_LEN];
 volatile uint32_t lpf_fifo_wr = 0;
 volatile uint32_t lpf_fifo_rd = 0;
 
-// Default DAC output coefficients
+// Default DAC output coefficients (unused currently)
 dds_out_ctrl_t dds_linear_comb = {
     .A1 = 0x7FFF,
     .B1 = 0,
@@ -106,20 +115,16 @@ dds_out_ctrl_t dds_linear_comb = {
     .B2 = 0x7FFF,
     .output_scale = 1
 };
-
 dds_phase_ctrl_t phase_dds;
-
-// Private state
 volatile int *dac_half_flag_ptr = NULL;
 volatile int *dac_full_flag_ptr = NULL;
 volatile int *cordic_done_flag_ptr = NULL;
 volatile bool *cordic_busy_flag_ptr = NULL;
-
 uint32_t ddsli_current_half = 0; // 0 to 6
 bool stop_flag = 0;
 
 // -----------------------------------------------------------------------------
-// DDS Phase Control
+// DDS Phase Vector Generation
 // -----------------------------------------------------------------------------
 
 static inline void dds_generate_phase_halfbuffer(
@@ -190,7 +195,7 @@ static inline void dds_set_frequency(float f, float sweep, float sample_f)
 }
 
 // -----------------------------------------------------------------------------
-// Linear Combination: A*sin + B*cos → DAC
+// Vector Linear Combination: A*sin + B*cos → DAC
 // -----------------------------------------------------------------------------
 
 // Process half-buffer: A*sin + B*cos → DAC samples
@@ -276,40 +281,36 @@ static inline void dds_process_dac_halfbuffer(uint32_t dac_half_idx,
 // Dual ADC Mixing: ADC × sincos → Demodulation products → Output FIFO
 // -----------------------------------------------------------------------------
 
-// static inline void dds_mixold_adc_sincos(
-//     volatile dual_adc_sample_t *adc_src,
-//     volatile cordic_out_sample_t *sincos_src,
-//     uint32_t len)
-// {
-//     float acc_ch0_cos = 0.0f;
-//     float acc_ch0_sin = 0.0f;
-//     float acc_ch1_cos = 0.0f;
-//     float acc_ch1_sin = 0.0f;
+static inline void dds_mixold_adc_sincos(
+    volatile dual_adc_sample_t *adc_src,
+    volatile cordic_out_sample_t *sincos_src,
+    uint32_t len)
+{
+    float acc_ch0_cos = 0.0f;
+    float acc_ch0_sin = 0.0f;
+    float acc_ch1_cos = 0.0f;
+    float acc_ch1_sin = 0.0f;
 
-//     for (uint32_t i = 0; i < len; i++) {
-//         /* ADC: 12-bit unsigned → signed float */
-//         float adc_ch0 = (float) adc_src[i].adc1_data - 2048.0f;
-//         float adc_ch1 = (float) adc_src[i].adc2_data - 2048.0f;
-//         float cos_val = (float) sincos_src[i].cos / (float) 32768.0f;
-//         float sin_val = (float) sincos_src[i].sin / (float) 32768.0f;
-//         acc_ch0_cos += adc_ch0 * cos_val;
-//         acc_ch0_sin += adc_ch0 * sin_val;
-//         acc_ch1_cos += adc_ch1 * cos_val;
-//         acc_ch1_sin += adc_ch1 * sin_val;
-//     }
+    for (uint32_t i = 0; i < len; i++) {
+        /* ADC: 12-bit unsigned → signed float */
+        float adc_ch0 = (float) adc_src[i].adc1_data - 2048.0f;
+        float adc_ch1 = (float) adc_src[i].adc2_data - 2048.0f;
+        float cos_val = (float) sincos_src[i].cos / (float) 32768.0f;
+        float sin_val = (float) sincos_src[i].sin / (float) 32768.0f;
+        acc_ch0_cos += adc_ch0 * cos_val;
+        acc_ch0_sin += adc_ch0 * sin_val;
+        acc_ch1_cos += adc_ch1 * cos_val;
+        acc_ch1_sin += adc_ch1 * sin_val;
+    }
 
-//     uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
-//     const float scale = 1.0f / 4096.0f / (len / 2);
-//     lpf_fifo[lpf_fifo_wr].chA[0] = acc_ch0_cos * scale;
-//     lpf_fifo[lpf_fifo_wr].chA[1] = acc_ch0_sin * scale;
-//     lpf_fifo[lpf_fifo_wr].chB[0] = acc_ch1_cos * scale;
-//     lpf_fifo[lpf_fifo_wr].chB[1] = acc_ch1_sin * scale;
-//     lpf_fifo_wr = next_wr;
-// }
-
-// #define CAPT_BUFF_HALVES 4
-// volatile dual_adc_sample_t adc_captbuf[CAPT_BUFF_HALVES * HB_LEN];             
-// volatile cordic_out_sample_t sincos_captbuf[CAPT_BUFF_HALVES * HB_LEN]; 
+    uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
+    const float scale = 1.0f / 4096.0f / (len / 2);
+    lpf_fifo[lpf_fifo_wr].chA[0] = acc_ch0_cos * scale;
+    lpf_fifo[lpf_fifo_wr].chA[1] = acc_ch0_sin * scale;
+    lpf_fifo[lpf_fifo_wr].chB[0] = acc_ch1_cos * scale;
+    lpf_fifo[lpf_fifo_wr].chB[1] = acc_ch1_sin * scale;
+    lpf_fifo_wr = next_wr;
+}
 
 static inline void dds_capt_adc_sincos(
     volatile dual_adc_sample_t *adc_src,
@@ -343,11 +344,11 @@ static inline void dds_mix_adc_sincos(
     float s1  = (float)len;
 
     for (uint32_t i = 0; i < len; i++) {
-        float x0 = (float)adc_src[i].adc1_data - 2048.0f;
-        float x1 = (float)adc_src[i].adc2_data - 2048.0f;
+        float x0 = (float)adc_src[(i)%(len*SINCOS_BUFF_HALVES)].adc1_data - 2048.0f;
+        float x1 = (float)adc_src[(i)%(len*SINCOS_BUFF_HALVES)].adc2_data - 2048.0f;
 
-        float c = (float)sincos_src[i].cos * (1.0f / 32768.0f);
-        float s = (float)sincos_src[i].sin * (1.0f / 32768.0f);
+        float c = (float)sincos_src[(i)%(len*SINCOS_BUFF_HALVES)].cos * (1.0f / 32768.0f);
+        float s = (float)sincos_src[(i)%(len*SINCOS_BUFF_HALVES)].sin * (1.0f / 32768.0f);
 
         /* H^T x */
         sx0 += x0 * c;
@@ -479,7 +480,7 @@ void ddsli_setup(void)
     phase_dds.phase = 0;
     phase_dds.phase_inc = (1ULL << 32) * 
     (uint64_t)((32767.75f * (1ULL << 32)) / 2000000.0f); 
-    // phase_dds.phase_inc_delta = 1000000;
+    phase_dds.phase_inc_delta = 1000000000;
     
     // Generate initial phases for both halves
     dds_generate_phase_halfbuffer_idx(0);
