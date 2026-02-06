@@ -10,7 +10,7 @@ volatile uint32_t adc_buffer[ADC_BUF_LEN];
 volatile uint32_t adc_capture_complete = 0;
 volatile uint32_t adc_capture_counter = 0;
 
-void adc_dual_dma_init(void) {
+void adc_dual_dma_sigleshot_init(void) {
     rcc_periph_clock_enable(RCC_GPIOA);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO6);
     
@@ -125,7 +125,7 @@ void adc_dual_dma_init(void) {
         ADC12_CFGR1_EXTSEL_TIM6_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
 }
 
-void adc_dualcirc_dma_init(void *buf, uint32_t len) {
+void adc_dual_dma_circular_init(void *buf, uint32_t len) {
     rcc_periph_clock_enable(RCC_GPIOA);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO6);
     
@@ -234,7 +234,7 @@ void adc_dualcirc_dma_init(void *buf, uint32_t len) {
     adc_start_conversion_regular(ADC1);
 }
 
-void adc_capture_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
+void adc_capture_singleshot_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
     /* Reset DMA configuration */
     dma_disable_channel(DMA1, DMA_CHANNEL1);
     

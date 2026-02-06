@@ -71,7 +71,6 @@ typedef struct {
     int16_t output_scale; // Additional scaling
 } dds_out_ctrl_t;
 
-
 // -----------------------------------------------------------------------------
 // Buffers & globals
 // -----------------------------------------------------------------------------
@@ -155,13 +154,8 @@ static inline void dds_generate_phase_halfbuffer32(
     int32_t slope = ctrl->phase_inc_delta >> 32; 
 
     for (uint32_t i = 0; i < len; i++) {
-        // Frequency sweep update
         inc += slope;
-        // Phase update
         phase += inc;
-        // Export to CORDIC:
-        //   high 16 bits = amplitude
-        //   low 16 bits = phase
         dst[i].amp = 0x6000;
         dst[i].phase = phase >> 16;
     }
@@ -282,36 +276,36 @@ static inline void dds_process_dac_halfbuffer(uint32_t dac_half_idx,
 // Dual ADC Mixing: ADC × sincos → Demodulation products → Output FIFO
 // -----------------------------------------------------------------------------
 
-static inline void dds_mix_adc_sincos(
-    volatile dual_adc_sample_t *adc_src,
-    volatile cordic_out_sample_t *sincos_src,
-    uint32_t len)
-{
-    float acc_ch0_cos = 0.0f;
-    float acc_ch0_sin = 0.0f;
-    float acc_ch1_cos = 0.0f;
-    float acc_ch1_sin = 0.0f;
+// static inline void dds_mixold_adc_sincos(
+//     volatile dual_adc_sample_t *adc_src,
+//     volatile cordic_out_sample_t *sincos_src,
+//     uint32_t len)
+// {
+//     float acc_ch0_cos = 0.0f;
+//     float acc_ch0_sin = 0.0f;
+//     float acc_ch1_cos = 0.0f;
+//     float acc_ch1_sin = 0.0f;
 
-    for (uint32_t i = 0; i < len; i++) {
-        /* ADC: 12-bit unsigned → signed float */
-        float adc_ch0 = (float) adc_src[i].adc1_data - 2048.0f;
-        float adc_ch1 = (float) adc_src[i].adc2_data - 2048.0f;
-        float cos_val = (float) sincos_src[i].cos / (float) 32768.0f;
-        float sin_val = (float) sincos_src[i].sin / (float) 32768.0f;
-        acc_ch0_cos += adc_ch0 * cos_val;
-        acc_ch0_sin += adc_ch0 * sin_val;
-        acc_ch1_cos += adc_ch1 * cos_val;
-        acc_ch1_sin += adc_ch1 * sin_val;
-    }
+//     for (uint32_t i = 0; i < len; i++) {
+//         /* ADC: 12-bit unsigned → signed float */
+//         float adc_ch0 = (float) adc_src[i].adc1_data - 2048.0f;
+//         float adc_ch1 = (float) adc_src[i].adc2_data - 2048.0f;
+//         float cos_val = (float) sincos_src[i].cos / (float) 32768.0f;
+//         float sin_val = (float) sincos_src[i].sin / (float) 32768.0f;
+//         acc_ch0_cos += adc_ch0 * cos_val;
+//         acc_ch0_sin += adc_ch0 * sin_val;
+//         acc_ch1_cos += adc_ch1 * cos_val;
+//         acc_ch1_sin += adc_ch1 * sin_val;
+//     }
 
-    uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
-    const float scale = 1.0f / 4096.0f / (len / 2);
-    lpf_fifo[lpf_fifo_wr].chA[0] = acc_ch0_cos * scale;
-    lpf_fifo[lpf_fifo_wr].chA[1] = acc_ch0_sin * scale;
-    lpf_fifo[lpf_fifo_wr].chB[0] = acc_ch1_cos * scale;
-    lpf_fifo[lpf_fifo_wr].chB[1] = acc_ch1_sin * scale;
-    lpf_fifo_wr = next_wr;
-}
+//     uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
+//     const float scale = 1.0f / 4096.0f / (len / 2);
+//     lpf_fifo[lpf_fifo_wr].chA[0] = acc_ch0_cos * scale;
+//     lpf_fifo[lpf_fifo_wr].chA[1] = acc_ch0_sin * scale;
+//     lpf_fifo[lpf_fifo_wr].chB[0] = acc_ch1_cos * scale;
+//     lpf_fifo[lpf_fifo_wr].chB[1] = acc_ch1_sin * scale;
+//     lpf_fifo_wr = next_wr;
+// }
 
 // #define CAPT_BUFF_HALVES 4
 // volatile dual_adc_sample_t adc_captbuf[CAPT_BUFF_HALVES * HB_LEN];             
@@ -334,104 +328,97 @@ static inline void dds_capt_adc_sincos(
     }
 }
 
-// static inline void dds_mix_adc_sincos(
-//     volatile dual_adc_sample_t   *adc_src,
-//     volatile cordic_out_sample_t *sincos_src,
-//     uint32_t len)
-// {
-//     for(int i = 0; i < len; i++) {
-//         dbadc[i] = adc_src[i];
-//     }
-//     for(int i = 0; i < len; i++) {
-//         dbsin[i] = sincos_src[i];
-//     }
+static inline void dds_mix_adc_sincos(
+    volatile dual_adc_sample_t   *adc_src,
+    volatile cordic_out_sample_t *sincos_src,
+    uint32_t len)
+{
+    /* Accumulators: H^T x */
+    float sx0 = 0.0f, sx1 = 0.0f, sx2 = 0.0f;
+    float sy0 = 0.0f, sy1 = 0.0f, sy2 = 0.0f;
 
-//     /* Accumulators: H^T x */
-//     float sx0 = 0.0f, sx1 = 0.0f, sx2 = 0.0f;
-//     float sy0 = 0.0f, sy1 = 0.0f, sy2 = 0.0f;
+    /* Accumulators: H^T H */
+    float scc = 0.0f, sss = 0.0f, scs = 0.0f;
+    float sc  = 0.0f, ss  = 0.0f;
+    float s1  = (float)len;
 
-//     /* Accumulators: H^T H */
-//     float scc = 0.0f, sss = 0.0f, scs = 0.0f;
-//     float sc  = 0.0f, ss  = 0.0f;
-//     float s1  = (float)len;
+    for (uint32_t i = 0; i < len; i++) {
+        float x0 = (float)adc_src[i].adc1_data - 2048.0f;
+        float x1 = (float)adc_src[i].adc2_data - 2048.0f;
 
-//     for (uint32_t i = 0; i < len; i++) {
-//         float x0 = (float)adc_src[i].adc1_data - 2048.0f;
-//         float x1 = (float)adc_src[i].adc2_data - 2048.0f;
+        float c = (float)sincos_src[i].cos * (1.0f / 32768.0f);
+        float s = (float)sincos_src[i].sin * (1.0f / 32768.0f);
 
-//         float c = (float)sincos_src[i].cos * (1.0f / 32768.0f);
-//         float s = (float)sincos_src[i].sin * (1.0f / 32768.0f);
+        /* H^T x */
+        sx0 += x0 * c;
+        sx1 += x0 * s;
+        sx2 += x0;
 
-//         /* H^T x */
-//         sx0 += x0 * c;
-//         sx1 += x0 * s;
-//         sx2 += x0;
+        sy0 += x1 * c;
+        sy1 += x1 * s;
+        sy2 += x1;
 
-//         sy0 += x1 * c;
-//         sy1 += x1 * s;
-//         sy2 += x1;
+        /* H^T H */
+        scc += c * c;
+        sss += s * s;
+        scs += c * s;
+        sc  += c;
+        ss  += s;
+    }
 
-//         /* H^T H */
-//         scc += c * c;
-//         sss += s * s;
-//         scs += c * s;
-//         sc  += c;
-//         ss  += s;
-//     }
+    /*
+     * Normal matrix:
+     * [ scc  scs  sc ]
+     * [ scs  sss  ss ]
+     * [ sc   ss   s1 ]
+     */
 
-//     /*
-//      * Normal matrix:
-//      * [ scc  scs  sc ]
-//      * [ scs  sss  ss ]
-//      * [ sc   ss   s1 ]
-//      */
+    float det =
+        scc * (sss * s1 - ss * ss) -
+        scs * (scs * s1 - ss * sc) +
+        sc  * (scs * ss - sss * sc);
 
-//     float det =
-//         scc * (sss * s1 - ss * ss) -
-//         scs * (scs * s1 - ss * sc) +
-//         sc  * (scs * ss - sss * sc);
+    if (det == 0.0f) {
+        return; /* ill-conditioned */
+    }
 
-//     if (det == 0.0f) {
-//         return; /* ill-conditioned */
-//     }
+    float inv_det = 1.0f / det;
 
-//     float inv_det = 1.0f / det;
+    /* Inverse(H^T H) */
+    float i00 =  (sss * s1 - ss * ss) * inv_det;
+    float i01 = -(scs * s1 - ss * sc) * inv_det;
+    float i02 =  (scs * ss - sss * sc) * inv_det;
 
-//     /* Inverse(H^T H) */
-//     float i00 =  (sss * s1 - ss * ss) * inv_det;
-//     float i01 = -(scs * s1 - ss * sc) * inv_det;
-//     float i02 =  (scs * ss - sss * sc) * inv_det;
+    float i10 = i01;
+    float i11 =  (scc * s1 - sc * sc) * inv_det;
+    float i12 = -(scc * ss - scs * sc) * inv_det;
 
-//     float i10 = i01;
-//     float i11 =  (scc * s1 - sc * sc) * inv_det;
-//     float i12 = -(scc * ss - scs * sc) * inv_det;
+    float i20 = i02;
+    float i21 = i12;
+    float i22 =  (scc * sss - scs * scs) * inv_det;
 
-//     float i20 = i02;
-//     float i21 = i12;
-//     float i22 =  (scc * sss - scs * scs) * inv_det;
+    /* Solve for channel A */
+    float IA = i00 * sx0 + i01 * sx1 + i02 * sx2;
+    float QA = i10 * sx0 + i11 * sx1 + i12 * sx2;
+    float DCA = i20 * sx0 + i21 * sx1 + i22 * sx2;
 
-//     /* Solve for channel A */
-//     float IA = i00 * sx0 + i01 * sx1 + i02 * sx2;
-//     float QA = i10 * sx0 + i11 * sx1 + i12 * sx2;
-//     float DCA = i20 * sx0 + i21 * sx1 + i22 * sx2;
+    /* Solve for channel B */
+    float IB = i00 * sy0 + i01 * sy1 + i02 * sy2;
+    float QB = i10 * sy0 + i11 * sy1 + i12 * sy2;
+    float DCB = i20 * sy0 + i21 * sy1 + i22 * sy2;
 
-//     /* Solve for channel B */
-//     float IB = i00 * sy0 + i01 * sy1 + i02 * sy2;
-//     float QB = i10 * sy0 + i11 * sy1 + i12 * sy2;
-//     float DCB = i20 * sy0 + i21 * sy1 + i22 * sy2;
+    uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
 
-//     uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
+    lpf_fifo[lpf_fifo_wr].chA[0] = IA;
+    lpf_fifo[lpf_fifo_wr].chA[1] = QA;
+    lpf_fifo[lpf_fifo_wr].chA[2] = DCA;
 
-//     lpf_fifo[lpf_fifo_wr].chA[0] = IA;
-//     lpf_fifo[lpf_fifo_wr].chA[1] = QA;
-//     lpf_fifo[lpf_fifo_wr].chA[2] = DCA;
+    lpf_fifo[lpf_fifo_wr].chB[0] = IB;
+    lpf_fifo[lpf_fifo_wr].chB[1] = QB;
+    lpf_fifo[lpf_fifo_wr].chB[2] = DCB;
 
-//     lpf_fifo[lpf_fifo_wr].chB[0] = IB;
-//     lpf_fifo[lpf_fifo_wr].chB[1] = QB;
-//     lpf_fifo[lpf_fifo_wr].chB[2] = DCB;
-
-//     lpf_fifo_wr = next_wr;
-// }
+    lpf_fifo_wr = next_wr;
+}
 
 // Convenience wrapper for half-buffer mixing
 static inline void dds_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sincos_offset)
@@ -469,7 +456,7 @@ void ddsli_setup(void)
     // be unsynchronized. After setup you can turn them on as needed.
 
     // Initialize peripherals.
-    adc_dualcirc_dma_init((uint32_t *)adc_buf, 2 * HB_LEN);
+    adc_dual_dma_circular_init((uint32_t *)adc_buf, 2 * HB_LEN);
     dac_init();
     cordic_init();
 
@@ -491,7 +478,7 @@ void ddsli_setup(void)
     // Initialize DDS phase
     phase_dds.phase = 0;
     phase_dds.phase_inc = (1ULL << 32) * 
-    (uint64_t)((32767.75f * (1ULL << 32)) / 1000000.0f); 
+    (uint64_t)((32767.75f * (1ULL << 32)) / 2000000.0f); 
     // phase_dds.phase_inc_delta = 1000000;
     
     // Generate initial phases for both halves

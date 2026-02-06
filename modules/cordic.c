@@ -71,13 +71,13 @@ int cordic_start_dma(volatile uint32_t *write_buf32, volatile uint32_t *read_buf
     dma_set_peripheral_address(DMA1, CORDIC_DMA_READ_CHANNEL, (uint32_t)&CORDIC_RDATA);
 
     dma_set_memory_address(DMA1, CORDIC_DMA_READ_CHANNEL, (uint32_t)read_buf32);
-    dma_set_number_of_data(DMA1, CORDIC_DMA_READ_CHANNEL, (uint16_t)(len));
+    dma_set_number_of_data(DMA1, CORDIC_DMA_READ_CHANNEL, (uint16_t)len);
     dma_set_peripheral_size(DMA1, CORDIC_DMA_READ_CHANNEL, DMA_CCR_PSIZE_32BIT);
     dma_set_memory_size(DMA1, CORDIC_DMA_READ_CHANNEL, DMA_CCR_MSIZE_32BIT);
     dma_enable_memory_increment_mode(DMA1, CORDIC_DMA_READ_CHANNEL);
     dma_disable_peripheral_increment_mode(DMA1, CORDIC_DMA_READ_CHANNEL);
     dma_set_read_from_peripheral(DMA1, CORDIC_DMA_READ_CHANNEL);
-    dma_set_priority(DMA1, CORDIC_DMA_READ_CHANNEL, DMA_CCR_PL_HIGH);
+    dma_set_priority(DMA1, CORDIC_DMA_READ_CHANNEL, DMA_CCR_PL_MEDIUM);
 
     /* enable transfer-complete interrupt on read channel and NVIC */
     dma_enable_transfer_complete_interrupt(DMA1, CORDIC_DMA_READ_CHANNEL);

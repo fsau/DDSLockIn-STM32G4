@@ -59,7 +59,7 @@ bool dma_memcpy_init(void)
     dma_enable_peripheral_increment_mode(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL);
     dma_set_peripheral_size(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL, DMA_CCR_PSIZE_32BIT);
     dma_set_memory_size(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL, DMA_CCR_MSIZE_32BIT);
-    dma_set_priority(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL, DMA_CCR_PL_VERY_HIGH);
+    dma_set_priority(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL, DMA_CCR_PL_MEDIUM);
     dma_enable_mem2mem_mode(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL);
     
     // Enable transfer complete interrupt only

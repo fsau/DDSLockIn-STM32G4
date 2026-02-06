@@ -129,7 +129,7 @@ void start_adc_dac_timer(void)
     rcc_periph_clock_enable(RCC_TIM6);  // Master timer: ADC/DAC
     
     uint32_t timer_clk = 170000000;     // APB2 timer clock (170 MHz)
-    uint32_t adc_rate = 500000;        // 2 MSa/s
+    uint32_t adc_rate = 2000000;        // 2 MSa/s
     uint32_t prescaler = 0;             // no prescaler
     uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
     
@@ -383,7 +383,7 @@ int main(void)
                 acc_ch1_sin += output.chB[1];
                 n++;
 
-                if(n >= 1000) {
+                if(n >= 500) {
                     acc_ch0_cos /= n;
                     acc_ch0_sin /= n;
                     acc_ch1_cos /= n;

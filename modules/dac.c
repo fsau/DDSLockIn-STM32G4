@@ -42,7 +42,8 @@ void dac_init(void)
     /* TIM3 expected running/configured by caller */
 
     dac_set_mode(DAC_INSTANCE, DAC_MCR_SINFORMAT1 | DAC_MCR_MODE1_E_BUFF |
-                               DAC_MCR_SINFORMAT2 | DAC_MCR_MODE2_E_BUFF);
+                               DAC_MCR_SINFORMAT2 | DAC_MCR_MODE2_E_BUFF |
+                               DAC_MCR_HFSEL_AHB160);
     dac_disable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
     dac_trigger_enable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
     dac_set_trigger_source(DAC_INSTANCE, DAC_CR_TSEL1_T6 | DAC_CR_TSEL2_T6);
@@ -75,12 +76,11 @@ int dac_start(volatile uint32_t *samples, size_t length)
     dma_disable_peripheral_increment_mode(DMA1, DAC_DMA_CHANNEL);
     dma_set_read_from_memory(DMA1, DAC_DMA_CHANNEL);
     dma_enable_circular_mode(DMA1, DAC_DMA_CHANNEL);
-    dma_set_priority(DMA1, DAC_DMA_CHANNEL, DMA_CCR_PL_VERY_HIGH);
+    dma_set_priority(DMA1, DAC_DMA_CHANNEL, DMA_CCR_PL_HIGH);
 
     /* Configure DMAMUX to route D'MA channel to DAC request */
     dmamux_reset_dma_channel(DMAMUX1, DAC_DMAMUX_CHANNEL);
-    dmamux_set_dma_channel_request(DMAMUX1, DAC_DMAMUX_CHANNEL, DMAMUX_CxCR_DMAREQ_ID_DAC1_CH1);
-    dmamux_enable_request_generator(DMAMUX1, DAC_DMAMUX_CHANNEL);
+    dmamux_set_dma_channel_request(DMAMUX1, DAC_DMAMUX_CHANNEL, DMAMUX_CxCR_DMAREQ_ID_ADC1);
 
     /* Enable DMA interrupts (HT, TC, TE) and NVIC for the channel */
     dma_enable_half_transfer_interrupt(DMA1, DAC_DMA_CHANNEL);
