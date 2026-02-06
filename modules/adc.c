@@ -227,6 +227,8 @@ void adc_dualcirc_dma_init(void *buf, uint32_t len) {
     dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_TCIF);
     dma_enable_channel(DMA1, DMA_CHANNEL1);
 
+    // Enable circular buffer!!!! without this loses ppm of sample
+    ADC_CCR(ADC1) |= ADC_CCR_DMACFG; // 
     /*  Enable DMA for ADC1 */
     adc_enable_dma(ADC1);
     adc_start_conversion_regular(ADC1);
