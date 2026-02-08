@@ -120,7 +120,7 @@ void adc_dual_dma_sigleshot_init(void) {
     ADC_CFGR1(ADC1) &= ~ADC_CFGR1_CONT; // disable continuous mode
 
     adc_enable_external_trigger_regular(ADC1,
-        ADC12_CFGR1_EXTSEL_TIM6_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
+        ADC12_CFGR1_EXTSEL_TIM4_CC4, ADC_CFGR1_EXTEN_FALLING_EDGE);
 }
 
 void adc_dual_dma_circular_init(void *buf, uint32_t len) {
@@ -187,7 +187,7 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len) {
     ADC_CCR(ADC1) |= ADC_CCR_MDMA_12_10_BIT;
 
     adc_enable_external_trigger_regular(ADC1,
-        ADC12_CFGR1_EXTSEL_TIM6_TRGO, ADC_CFGR1_EXTEN_RISING_EDGE);
+        ADC12_CFGR1_EXTSEL_TIM3_CC4, ADC_CFGR1_EXTEN_FALLING_EDGE);
     
     /*  Configure DMA */
     dma_channel_reset(DMA1, DMA_CHANNEL1);
@@ -212,7 +212,6 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len) {
         DMA_CHANNEL1,
         DMAMUX_CxCR_DMAREQ_ID_ADC1
     );
-    dmamux_enable_request_generator(DMAMUX1, DMA_CHANNEL1);
 
     // Enable transfer complete/half interrupt
     dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
@@ -220,9 +219,8 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len) {
     dma_enable_half_transfer_interrupt(DMA1, DMA_CHANNEL1);
     
     /*  Configure NVIC for DMA */
-    nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ);
-
     dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_TCIF);
+    nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ);
     dma_enable_channel(DMA1, DMA_CHANNEL1);
 
     // Enable circular buffer!!!! without this loses ppm of sample

@@ -123,59 +123,59 @@ void dpot_set(uint8_t new_pos)
     // usbserial_send_tx(buf, s);
 }
 
-void start_adc_dac_timer(void)
+void load_adc_dac_timer(void)
 {
-    /* Enable clocks */
-    rcc_periph_clock_enable(RCC_TIM6);  // Master timer: ADC/DAC
+    rcc_periph_clock_enable(RCC_TIM4);  // Master timer: ADC/DAC
+    rcc_periph_clock_enable(RCC_TIM3);  // Master timer: ADC/DAC
     
     uint32_t timer_clk = 170000000;     // APB2 timer clock (170 MHz)
-    uint32_t adc_rate = 2000000;        // 2 MSa/s
+    uint32_t adc_rate = 1000000;        // 2 MSa/s
     uint32_t prescaler = 0;             // no prescaler
     uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
     
-    /* --- MASTER TIMER (TIM6) for ADC --- */
-    timer_set_prescaler(TIM6, prescaler);
-    timer_set_period(TIM6, arr);
+    timer_set_prescaler(TIM4, prescaler);
+    timer_set_period(TIM4, arr);
+    timer_set_master_mode(TIM4, TIM_CR2_MMS_UPDATE);
     
-    /* TRGO on update event - output trigger to slave */
-    timer_set_master_mode(TIM6, TIM_CR2_MMS_UPDATE);
-    
-    /* Enable counter */
-    timer_enable_counter(TIM6);
+    gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO9);
+    gpio_set_output_options(GPIOB,
+                            GPIO_OTYPE_PP,
+                            GPIO_OSPEED_2MHZ,
+                            GPIO9);
+    gpio_set_af(GPIOB, GPIO_AF2, GPIO9);
+    timer_set_oc_mode(TIM4, TIM_OC4, TIM_OCM_PWM1);
+    timer_set_oc_value(TIM4, TIM_OC4, arr / 2);
+    timer_enable_oc_output(TIM4, TIM_OC4);
+    TIM_DIER(TIM4) |= TIM_DIER_CC4DE;
 
-    /* --- SLAVE TIMER (TIM3) for DAC --- */
-    /* Same base rate as TIM6 */
     timer_set_prescaler(TIM3, prescaler);
     timer_set_period(TIM3, arr);
-    
-    /* Reset counter on trigger to ensure synchronization */
-    timer_slave_set_mode(TIM3, TIM_SMCR_SMS_EM3);  // Reset mode
-    timer_slave_set_trigger(TIM3, TIM_SMCR_TS_ITR2);
-    // timer_set_master_mode(TIM3, TIM_CR2_MMS_UPDATE);
-    
-    // /* For multiple frequency, use update event as internal trigger */
-    // if (MULTIPLE_RATIO > 1) {
-    //     /* Divide the trigger rate */
-    //     timer_slave_set_mode(TIM3, TIM_SMCR_SMS_ECE);  // External clock mode
-    //     timer_slave_set_trigger(TIM3, TIM_SMCR_TS_ITR2);
-    //     timer_set_prescaler(TIM3, MULTIPLE_RATIO - 1);  // Divide frequency
-    // }
-    
-    /* Enable DAC trigger on update */
-    // timer_update_on_any(TIM3);
-    // timer_enable_update_event(TIM3);
-    // timer_set_dma_on_update_event(TIM3);
-    
-    /* Enable counter */
-    timer_enable_counter(TIM3);
-    
-    /* Configure output for debugging (optional) */
-    rcc_periph_clock_enable(RCC_GPIOB);
+    timer_set_master_mode(TIM3, TIM_CR2_MMS_UPDATE);
+    timer_slave_set_mode(TIM3,TIM_SMCR_SMS_TM);
+    timer_slave_set_trigger(TIM3,TIM_SMCR_TS_ITR3);
+
     gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO0);
+    gpio_set_output_options(GPIOB,
+                            GPIO_OTYPE_PP,
+                            GPIO_OSPEED_2MHZ,
+                            GPIO0);
     gpio_set_af(GPIOB, GPIO_AF2, GPIO0);
+    timer_set_oc_mode(TIM3, TIM_OC4, TIM_OCM_PWM1);
     timer_set_oc_mode(TIM3, TIM_OC3, TIM_OCM_PWM1);
-    timer_set_oc_value(TIM3, TIM_OC3, (arr + 1) / 2);
+    timer_set_oc_value(TIM3, TIM_OC4, arr / 2);
+    timer_set_oc_value(TIM3, TIM_OC3, arr / 2);
     timer_enable_oc_output(TIM3, TIM_OC3);
+    timer_enable_oc_output(TIM3, TIM_OC4);
+}
+
+void start_adc_dac_timer(void)
+{
+    timer_enable_counter(TIM4);
+}
+
+void stop_adc_dac_timer(void)
+{
+    timer_disable_counter(TIM4);
 }
 
 void jump_to_dfu(void)
@@ -258,6 +258,7 @@ int main(void)
     spi_setup();
     ad9833_init();
     dpot_init();
+    load_adc_dac_timer();
 
 #ifdef LEGACY_MODE
     adc_dual_dma_init();
@@ -276,9 +277,9 @@ int main(void)
     ddsli_setup();
 #endif
 
-    start_adc_dac_timer();
-
     for(uint32_t i = 0; i < 1000000; i+=1) __asm__("nop");
+
+    start_adc_dac_timer();
 
     // Command parsing states
     enum {
@@ -296,7 +297,7 @@ int main(void)
     {
         uint8_t buf[64];
         uint8_t len = usbserial_read_rx(buf, 64);
-//         // usbserial_send_tx(buf,len);
+        usbserial_send_tx(buf,len);
 
         for(uint32_t i = 0; i < len; i++)
         {
@@ -319,7 +320,7 @@ int main(void)
                     }
                     else if(buf[i] == 'D' || buf[i] == 'd') {
                         // Jump to DFU bootloader
-                        jump_to_dfu();
+                        // jump_to_dfu();
                     }
                     else if(buf[i] == 'S' || buf[i] == 's') {
                         // stop_adc_dac_timer();
@@ -361,10 +362,9 @@ int main(void)
             }
         }
 
-        if((clock_ticks/10) != lasttick)
+        if((clock_ticks/2) != lasttick)
         {
-            lasttick = clock_ticks/10;
-            // gpio_toggle(GPIOC, GPIO6);
+            lasttick = clock_ticks/2;
             ad9833_set_freq_word(freqw);
 
             static float acc_ch0_cos = 0;
@@ -372,11 +372,9 @@ int main(void)
             static float acc_ch1_cos = 0;
             static float acc_ch1_sin = 0;
             static int32_t n = 0;
-
-            while(ddsli_output_ready()) {
-                ddsli_output_t output;
-                ddsli_output_pop(&output);
-
+            ddsli_output_t output;
+            while(ddsli_output_pop(&output))
+            {
                 acc_ch0_cos += output.chA[0];
                 acc_ch0_sin += output.chA[1];
                 acc_ch1_cos += output.chB[0];
@@ -384,13 +382,14 @@ int main(void)
                 n++;
 
                 if(n >= 500) {
+                    gpio_toggle(GPIOC, GPIO6);
                     acc_ch0_cos /= n;
                     acc_ch0_sin /= n;
                     acc_ch1_cos /= n;
                     acc_ch1_sin /= n;
 
-                    uint8_t outbuf[80];
-                    uint8_t s = snprintf(outbuf, 80,
+                    uint8_t outbuf[100];
+                    uint8_t s = snprintf(outbuf, 100,
                         "CH0 COS: %f SIN: %f | CH1 COS: %f SIN: %f\r\n",
                         (float)acc_ch0_cos,
                         (float)acc_ch0_sin,
@@ -399,6 +398,8 @@ int main(void)
                     );
                         
                     usbserial_send_tx(outbuf, s);
+                    // uint8_t testb[] = "test ";
+                    // usbserial_send_tx(testb,sizeof(testb));
 
                     acc_ch0_cos = 0;
                     acc_ch0_sin = 0;

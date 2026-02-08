@@ -11,10 +11,16 @@
 
     - Add residuals to demod (1 or per basis?)
     - Change timers triggers to two timers:
-        - ADC (slave) after DAC (master), adjustable timing
+        - ADC (slave) after DAC (master), adjustable delay
         - Check what's causing phase offset, is it only timing?
     - Fix half-buffer flags & DMA interrupts: flags for every buffer piece
-    - ADC/sincos capture buffers for oscilloscope view/diagnostics
+    - ADC/sincos capture buffers for oscilloscope view/diagnostics: CCM?
+    - Single phase half-buffer: less memory, just trigger cordic afterwards?
+      (processing time is the same). Then cordic while mixing?
+        - Bad part: cant CORDIC while calc. phases (but can while mixing)
+        - Good part: could CORDIC two independent phases in one pass
+    - OPA preamp
+    - Calibration routines?
  */
 
 #include "ddsli.h"
@@ -89,7 +95,9 @@ typedef struct {
 // #define SKIP_CPU_LC
 
 #define CAPT_BUFF_HALVES 4
-volatile dual_adc_sample_t adc_captbuf[CAPT_BUFF_HALVES * HB_LEN];             
+__attribute__((section(".ccm_data")))
+volatile dual_adc_sample_t adc_captbuf[CAPT_BUFF_HALVES * HB_LEN];    
+__attribute__((section(".ccm_data")))         
 volatile cordic_out_sample_t sincos_captbuf[CAPT_BUFF_HALVES * HB_LEN]; 
 
 #ifdef SKIP_CPU_LC
@@ -99,10 +107,12 @@ volatile cordic_out_sample_t sincos_captbuf[CAPT_BUFF_HALVES * HB_LEN];
 #define SINCOS_BUFF_HALVES 3
 volatile dual_adc_sample_t dac_buf[2 * HB_LEN];        
 #endif
+
 volatile cordic_in_phase_t phase_buf[2 * HB_LEN]; 
 volatile cordic_out_sample_t sincos_buf[SINCOS_BUFF_HALVES * HB_LEN]; 
-volatile dual_adc_sample_t adc_buf[2 * HB_LEN];             
-#define LPF_FIFO_LEN 1U
+volatile dual_adc_sample_t adc_buf[2 * HB_LEN];      
+
+#define LPF_FIFO_LEN 64U
 volatile ddsli_output_t lpf_fifo[LPF_FIFO_LEN];
 volatile uint32_t lpf_fifo_wr = 0;
 volatile uint32_t lpf_fifo_rd = 0;
@@ -116,6 +126,8 @@ dds_out_ctrl_t dds_linear_comb = {
     .output_scale = 1
 };
 dds_phase_ctrl_t phase_dds;
+volatile int *adc_half_flag_ptr = NULL;
+volatile int *adc_full_flag_ptr = NULL;
 volatile int *dac_half_flag_ptr = NULL;
 volatile int *dac_full_flag_ptr = NULL;
 volatile int *cordic_done_flag_ptr = NULL;
@@ -140,7 +152,7 @@ static inline void dds_generate_phase_halfbuffer(
     for (uint32_t i = 0; i < len; i++) {
         inc += slope;
         phase += inc;
-        dst[i].amp = 0x6000;
+        dst[i].amp = 0x4000;
         dst[i].phase = phase >> 48;
     }
 
@@ -161,7 +173,7 @@ static inline void dds_generate_phase_halfbuffer32(
     for (uint32_t i = 0; i < len; i++) {
         inc += slope;
         phase += inc;
-        dst[i].amp = 0x6000;
+        dst[i].amp = 0x4000;
         dst[i].phase = phase >> 16;
     }
 
@@ -344,11 +356,11 @@ static inline void dds_mix_adc_sincos(
     float s1  = (float)len;
 
     for (uint32_t i = 0; i < len; i++) {
-        float x0 = (float)adc_src[(i)%(len*SINCOS_BUFF_HALVES)].adc1_data - 2048.0f;
-        float x1 = (float)adc_src[(i)%(len*SINCOS_BUFF_HALVES)].adc2_data - 2048.0f;
+        float x0 = (float)adc_src[i].adc1_data - 2048.0f;
+        float x1 = (float)adc_src[i].adc2_data - 2048.0f;
 
-        float c = (float)sincos_src[(i)%(len*SINCOS_BUFF_HALVES)].cos * (1.0f / 32768.0f);
-        float s = (float)sincos_src[(i)%(len*SINCOS_BUFF_HALVES)].sin * (1.0f / 32768.0f);
+        float c = (float)sincos_src[i].cos * (1.0f / 32768.0f);
+        float s = (float)sincos_src[i].sin * (1.0f / 32768.0f);
 
         /* H^T x */
         sx0 += x0 * c;
@@ -423,12 +435,14 @@ static inline void dds_mix_adc_sincos(
 
 // Convenience wrapper for half-buffer mixing
 static inline void dds_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sincos_offset)
-{
-    volatile dual_adc_sample_t *adc_src = &adc_buf[((adc_half_idx)%2) * HB_LEN];
-    volatile cordic_out_sample_t *sincos_src = &sincos_buf[((sincos_offset)%SINCOS_BUFF_HALVES) * HB_LEN];
-    
-    dds_mix_adc_sincos(adc_src, sincos_src, HB_LEN);
-    // dds_capt_adc_sincos(adc_src, sincos_src, HB_LEN);
+{ 
+    for(uint32_t i = 0; i < HB_LEN; i++)
+    {
+        adc_captbuf[i].raw = adc_buf[(adc_half_idx * HB_LEN + i)%(2 * HB_LEN)].raw;
+        sincos_captbuf[i].raw = sincos_buf[(sincos_offset * HB_LEN + i)%(SINCOS_BUFF_HALVES * HB_LEN)].raw;
+    }
+
+    dds_mix_adc_sincos(adc_captbuf, sincos_captbuf, HB_LEN);
 }
 
 // -----------------------------------------------------------------------------
@@ -457,8 +471,8 @@ void ddsli_setup(void)
     // be unsynchronized. After setup you can turn them on as needed.
 
     // Initialize peripherals.
-    adc_dual_dma_circular_init((uint32_t *)adc_buf, 2 * HB_LEN);
     dac_init();
+    adc_dual_dma_circular_init((uint32_t *)adc_buf, 2 * HB_LEN);
     cordic_init();
 
     nvic_set_priority(NVIC_PENDSV_IRQ, 0xFF); // min priority
@@ -479,8 +493,8 @@ void ddsli_setup(void)
     // Initialize DDS phase
     phase_dds.phase = 0;
     phase_dds.phase_inc = (1ULL << 32) * 
-    (uint64_t)((32767.75f * (1ULL << 32)) / 2000000.0f); 
-    phase_dds.phase_inc_delta = 1000000000;
+    (uint64_t)((32767.75f * (1ULL << 32)) / 1000000.0f); 
+    // phase_dds.phase_inc_delta = 1;
     
     // Generate initial phases for both halves
     dds_generate_phase_halfbuffer_idx(0);
@@ -613,14 +627,14 @@ bool ddsli_output_pop(ddsli_output_t *out)
     if (out) {
         *out = lpf_fifo[lpf_fifo_rd];
     }
-    lpf_fifo_rd = (lpf_fifo_rd + 2) % LPF_FIFO_LEN;
+    lpf_fifo_rd = (lpf_fifo_rd + 1) % LPF_FIFO_LEN;
     return true;
 }
 
 // PendSV Handler (runs after all higher priority ISRs)
 void pend_sv_handler(void) {
     SCB_ICSR |= SCB_ICSR_PENDSVCLR;
-    gpio_set(GPIOC, GPIO6);
+    // gpio_set(GPIOC, GPIO6);
     ddsli_step();
-    gpio_clear(GPIOC, GPIO6);
+    // gpio_clear(GPIOC, GPIO6);
 }
