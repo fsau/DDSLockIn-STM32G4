@@ -120,7 +120,7 @@ void adc_dual_dma_sigleshot_init(void) {
     ADC_CFGR1(ADC1) &= ~ADC_CFGR1_CONT; // disable continuous mode
 
     adc_enable_external_trigger_regular(ADC1,
-        ADC12_CFGR1_EXTSEL_TIM4_CC4, ADC_CFGR1_EXTEN_FALLING_EDGE);
+        ADC12_CFGR1_EXTSEL_TIM3_CC4, ADC_CFGR1_EXTEN_FALLING_EDGE);
 }
 
 void adc_dual_dma_circular_init(void *buf, uint32_t len) {

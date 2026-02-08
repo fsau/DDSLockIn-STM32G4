@@ -12,7 +12,6 @@
 #include "usbserial.h"
 #include "adc.h"
 #include "spi.h"
-#include "ad9833.h"
 #include "cordic.h"
 #include "dac.h"
 #include "ddsli.h"
@@ -52,81 +51,28 @@ void bp_here(void) {__asm__ volatile ("bkpt #0");;}
 
 uint16_t ch0[ADC_BUF_LEN], ch1[ADC_BUF_LEN];
 
-uint8_t dpot_pos = 0;
-
-void dpot_init(void)
-{
-    // Initialize UD (direction) pin
-    gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO10);
-    gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO10);
-    
-    // Initialize INC (increment) pin  
-    gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, GPIO11);
-    gpio_set_output_options(GPIOC, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, GPIO11);
-
-    // Set direction to increase
-    gpio_set(GPIOC, GPIO10);
-    for(int j = 0; j < 1000; j++) __asm__("nop");
-    
-    // Move to maximum position (100)
-    for(uint8_t i = 0; i < 100; i++)
-    {
-        gpio_clear(GPIOC, GPIO11);
-        for(int j = 0; j < 1000; j++) __asm__("nop");
-        gpio_set(GPIOC, GPIO11);
-        for(int j = 0; j < 1000; j++) __asm__("nop");
-    }
-    
-    dpot_pos = 100;
-    gpio_clear(GPIOC, GPIO10); // Set direction back to default (decrease)
-}
-
-void dpot_set(uint8_t new_pos)
-{
-    if(new_pos > 100) new_pos = 100; // Limit to maximum
-    
-    if(new_pos > dpot_pos) {
-        // Need to increase
-        gpio_set(GPIOC, GPIO10); // Set direction to increase
-        for(int j = 0; j < 10000; j++) __asm__("nop");
-        
-        uint8_t steps = new_pos - dpot_pos;
-        for(uint8_t i = 0; i < steps; i++) {
-            gpio_clear(GPIOC, GPIO11);
-            for(int j = 0; j < 10000; j++) __asm__("nop");
-            gpio_set(GPIOC, GPIO11);
-            for(int j = 0; j < 10000; j++) __asm__("nop");
-        }
-        
-        gpio_clear(GPIOC, GPIO10); // Reset direction
-    } 
-    else if(new_pos < dpot_pos) {
-        // Need to decrease
-        gpio_clear(GPIOC, GPIO10); // Set direction to decrease
-        for(int j = 0; j < 10000; j++) __asm__("nop");
-        
-        uint8_t steps = dpot_pos - new_pos;
-        for(uint8_t i = 0; i < steps; i++) {
-            gpio_clear(GPIOC, GPIO11);
-            for(int j = 0; j < 10000; j++) __asm__("nop");
-            gpio_set(GPIOC, GPIO11);
-            for(int j = 0; j < 10000; j++) __asm__("nop");
-        }
-    }
-    // If equal, do nothing
-    
-    dpot_pos = new_pos;
-    
-    // Optional: Send confirmation back
-    // uint8_t buf[32];
-    // uint8_t s = snprintf(buf, 32, "DPOT set to %d\r\n", dpot_pos);
-    // usbserial_send_tx(buf, s);
-}
-
+/*
+ * Configure timers for DAC (TIM4) and ADC (TIM3)
+ *
+ * TIM4 provides the DAC timing reference and triggers DAC conversion on the update
+ * event. To compensate for the DAC internal one-cycle pipeline latency, the DAC
+ * DMA request is sourced from a TIM4 compare event rather than the DAC’s default
+ * DMA request source.
+ *
+ * TIM3 is configured as a slave only for startup synchronization: it starts on
+ * the TIM4 update trigger to guarantee a deterministic phase relationship at
+ * t = 0. After startup, TIM3 runs freely and independently.
+ *
+ * Both timers are programmed with identical prescaler and auto-reload values.
+ * These parameters must always match and must not be modified while running,
+ * as doing so breaks the DAC/ADC phase relationship.
+ *
+ * Optional PWM outputs are enabled for external timing observation and debugging.
+ */
 void load_adc_dac_timer(void)
 {
-    rcc_periph_clock_enable(RCC_TIM4);  // Master timer: ADC/DAC
-    rcc_periph_clock_enable(RCC_TIM3);  // Master timer: ADC/DAC
+    rcc_periph_clock_enable(RCC_TIM4);  // Master timer: DAC
+    rcc_periph_clock_enable(RCC_TIM3);  // Slave timer: ADC
     
     uint32_t timer_clk = 170000000;     // APB2 timer clock (170 MHz)
     uint32_t adc_rate = 1000000;        // 2 MSa/s
@@ -144,14 +90,14 @@ void load_adc_dac_timer(void)
                             GPIO9);
     gpio_set_af(GPIOB, GPIO_AF2, GPIO9);
     timer_set_oc_mode(TIM4, TIM_OC4, TIM_OCM_PWM1);
-    timer_set_oc_value(TIM4, TIM_OC4, arr / 2);
-    timer_enable_oc_output(TIM4, TIM_OC4);
-    TIM_DIER(TIM4) |= TIM_DIER_CC4DE;
+    timer_set_oc_value(TIM4, TIM_OC4, arr / 2); // 50% duty
+    timer_enable_oc_output(TIM4, TIM_OC4); // Debug PWM output
+    TIM_DIER(TIM4) |= TIM_DIER_CC4DE; // Enable DMA output for DAC
 
     timer_set_prescaler(TIM3, prescaler);
     timer_set_period(TIM3, arr);
     timer_set_master_mode(TIM3, TIM_CR2_MMS_UPDATE);
-    timer_slave_set_mode(TIM3,TIM_SMCR_SMS_TM);
+    timer_slave_set_mode(TIM3,TIM_SMCR_SMS_TM); // Starts after TIM4 update
     timer_slave_set_trigger(TIM3,TIM_SMCR_TS_ITR3);
 
     gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO0);
@@ -162,10 +108,10 @@ void load_adc_dac_timer(void)
     gpio_set_af(GPIOB, GPIO_AF2, GPIO0);
     timer_set_oc_mode(TIM3, TIM_OC4, TIM_OCM_PWM1);
     timer_set_oc_mode(TIM3, TIM_OC3, TIM_OCM_PWM1);
-    timer_set_oc_value(TIM3, TIM_OC4, arr / 2);
-    timer_set_oc_value(TIM3, TIM_OC3, arr / 2);
-    timer_enable_oc_output(TIM3, TIM_OC3);
-    timer_enable_oc_output(TIM3, TIM_OC4);
+    timer_set_oc_value(TIM3, TIM_OC4, arr / 2); // Tune ADC timing here
+    timer_set_oc_value(TIM3, TIM_OC3, arr / 2); // Debug PWM duty
+    timer_enable_oc_output(TIM3, TIM_OC3); // Debug PWM output
+    timer_enable_oc_output(TIM3, TIM_OC4); // ADC
 }
 
 void start_adc_dac_timer(void)
@@ -256,8 +202,6 @@ int main(void)
     dma_memcpy_init();
     usbserial_init();
     spi_setup();
-    ad9833_init();
-    dpot_init();
     load_adc_dac_timer();
 
 #ifdef LEGACY_MODE
@@ -333,8 +277,8 @@ int main(void)
                         cmd_digits++;
                     } else {
                         // Non-digit or max digits reached - execute command
-                        freqw = cmd_value;
-                        ad9833_set_freq_word(freqw);
+                        // freqw = cmd_value;
+                        // ad9833_set_freq_word(freqw);
                         
                         // Reset to idle state
                         cmd_state = CMD_IDLE;
@@ -351,7 +295,7 @@ int main(void)
                     } else {
                         // Non-digit or max digits reached - execute command
                         if(cmd_value > 100) cmd_value = 100; // Clamp to max
-                        dpot_set((uint8_t)cmd_value);
+                        // dpot_set((uint8_t)cmd_value);
                         
                         // Reset to idle state
                         cmd_state = CMD_IDLE;
@@ -365,7 +309,7 @@ int main(void)
         if((clock_ticks/2) != lasttick)
         {
             lasttick = clock_ticks/2;
-            ad9833_set_freq_word(freqw);
+            // ad9833_set_freq_word(freqw);
 
             static float acc_ch0_cos = 0;
             static float acc_ch0_sin = 0;
@@ -382,7 +326,7 @@ int main(void)
                 n++;
 
                 if(n >= 500) {
-                    gpio_toggle(GPIOC, GPIO6);
+                    // gpio_toggle(GPIOC, GPIO6);
                     acc_ch0_cos /= n;
                     acc_ch0_sin /= n;
                     acc_ch1_cos /= n;

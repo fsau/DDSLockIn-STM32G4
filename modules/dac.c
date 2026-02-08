@@ -46,7 +46,7 @@ void dac_init(void)
                                DAC_MCR_HFSEL_AHB160);
     dac_disable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
     dac_trigger_enable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
-    dac_dma_enable(DAC_INSTANCE, DAC_CHANNEL1);
+    dac_set_trigger_source(DAC_INSTANCE, DAC_CR_TSEL1_T4 | DAC_CR_TSEL2_T4);
     
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO5);
@@ -63,8 +63,10 @@ int dac_start(volatile uint32_t *samples, size_t length)
     user_buf = (const uint32_t *)samples;
     user_len = length;
 
-    /* Configure DMAMUX to route D'MA channel to DAC request */
+    /* Configure DMAMUX to route DMA channel to DAC request */
     dmamux_reset_dma_channel(DMAMUX1, DAC_DMAMUX_CHANNEL);
+
+    // DAC DMA trigger is TIM4 CC4, so it can "pre-feed" the DAC
     dmamux_set_dma_channel_request(DMAMUX1, DAC_DMAMUX_CHANNEL, DMAMUX_CxCR_DMAREQ_ID_TIM4_CH4);
 
     /* Configure DMA1 channel for peripheral<-memory circular transfers */
@@ -87,8 +89,8 @@ int dac_start(volatile uint32_t *samples, size_t length)
     dma_enable_transfer_error_interrupt(DMA1, DAC_DMA_CHANNEL);
     dma_channel_enable_irq_with_priority(DAC_DMA_CHANNEL, 0);
 
-    dac_set_trigger_source(DAC_INSTANCE, DAC_CR_TSEL1_T4 | DAC_CR_TSEL2_T4);
     dac_enable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
+    DAC_DHR12LD(DAC1) = 0;
 
     /* Enable DMA channel */
     dma_enable_channel(DMA1, DAC_DMA_CHANNEL);

@@ -2,8 +2,10 @@
  * DDS + Lock-In Demodulator
  *
  * Streaming DDS signal generator with synchronous demodulation.
- * Fully deterministic processing using circular buffers split into halves.
- * ADC and DAC run continuously via DMA, CPU processes completed half-buffers.
+ * Continuous processing using circular buffers split into halves.
+ * ADC and DAC buffers run via DMA, CPU processes completed half-buffers
+ * using ISR/flags for signalling.
+ * The step function can be called on main or on a low priority ISR.
  */
 
  /*
@@ -11,16 +13,20 @@
 
     - Add residuals to demod (1 or per basis?)
     - Change timers triggers to two timers:
-        - ADC (slave) after DAC (master), adjustable delay
-        - Check what's causing phase offset, is it only timing?
+        - ADC (slave) after DAC (master), adjustable delay - Done (TIM3/4)
+        - Check what's causing phase offset, is it only timing? Mostly!
     - Fix half-buffer flags & DMA interrupts: flags for every buffer piece
+        - Actually now in doubt if that will be useful, maybe only some
+          checks once in a while?
+          - Can check buffer ISR counters & DMA data remaining counter
+          - What action to take if they're not in sync?
     - ADC/sincos capture buffers for oscilloscope view/diagnostics: CCM?
     - Single phase half-buffer: less memory, just trigger cordic afterwards?
-      (processing time is the same). Then cordic while mixing?
-        - Bad part: cant CORDIC while calc. phases (but can while mixing)
-        - Good part: could CORDIC two independent phases in one pass
-    - OPA preamp
-    - Calibration routines?
+        - Cordic while mixing enough?
+        - Bad: cant CORDIC while calc. phases (but can while mixing)
+        - Good: could CORDIC two independent phases in one pass
+    - OPA preamp and OPA DAC2 output
+    - Calibration routines? Internal connect DAC-ADC?
  */
 
 #include "ddsli.h"
@@ -293,6 +299,7 @@ static inline void dds_process_dac_halfbuffer(uint32_t dac_half_idx,
 // Dual ADC Mixing: ADC × sincos → Demodulation products → Output FIFO
 // -----------------------------------------------------------------------------
 
+// Mix/multiplier + block integrator
 static inline void dds_mixold_adc_sincos(
     volatile dual_adc_sample_t *adc_src,
     volatile cordic_out_sample_t *sincos_src,
@@ -324,6 +331,7 @@ static inline void dds_mixold_adc_sincos(
     lpf_fifo_wr = next_wr;
 }
 
+// Only copy buffer
 static inline void dds_capt_adc_sincos(
     volatile dual_adc_sample_t *adc_src,
     volatile cordic_out_sample_t *sincos_src,
@@ -341,6 +349,7 @@ static inline void dds_capt_adc_sincos(
     }
 }
 
+// Least squares regression with 2 components + DC
 static inline void dds_mix_adc_sincos(
     volatile dual_adc_sample_t   *adc_src,
     volatile cordic_out_sample_t *sincos_src,
@@ -436,13 +445,10 @@ static inline void dds_mix_adc_sincos(
 // Convenience wrapper for half-buffer mixing
 static inline void dds_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sincos_offset)
 { 
-    for(uint32_t i = 0; i < HB_LEN; i++)
-    {
-        adc_captbuf[i].raw = adc_buf[(adc_half_idx * HB_LEN + i)%(2 * HB_LEN)].raw;
-        sincos_captbuf[i].raw = sincos_buf[(sincos_offset * HB_LEN + i)%(SINCOS_BUFF_HALVES * HB_LEN)].raw;
-    }
+    volatile dual_adc_sample_t *adc_src = &adc_buf[((adc_half_idx)%2) * HB_LEN];
+    volatile cordic_out_sample_t *sincos_src = &sincos_buf[((sincos_offset)%SINCOS_BUFF_HALVES) * HB_LEN];
 
-    dds_mix_adc_sincos(adc_captbuf, sincos_captbuf, HB_LEN);
+    dds_mix_adc_sincos(adc_src, sincos_src, HB_LEN);
 }
 
 // -----------------------------------------------------------------------------
@@ -631,10 +637,10 @@ bool ddsli_output_pop(ddsli_output_t *out)
     return true;
 }
 
-// PendSV Handler (runs after all higher priority ISRs)
+// Main update routine, runs in low priority ISR for low latency
 void pend_sv_handler(void) {
     SCB_ICSR |= SCB_ICSR_PENDSVCLR;
-    // gpio_set(GPIOC, GPIO6);
+    gpio_set(GPIOC, GPIO6);
     ddsli_step();
-    // gpio_clear(GPIOC, GPIO6);
+    gpio_clear(GPIOC, GPIO6);
 }
