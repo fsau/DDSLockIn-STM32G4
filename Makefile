@@ -8,8 +8,8 @@ SIZE = $(CROSS_COMPILE)size
 DEFS ?=
 CPUFLAGS = -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
 CFLAGS = -Wall -Wextra -g3 -O3 -MD  -ffast-math $(CPUFLAGS) -DSTM32G4 -I./libopencm3/include -Imodules $(DEFS)
-LDFLAGS = $(CPUFLAGS) -nostartfiles -L./libopencm3/lib -Wl,-T,$(LDSCRIPT) -Wl,-Map,$(TARGET).map -specs=nano.specs -u _printf_float
-LDLIBS = -lopencm3_stm32g4 -lc -lnosys
+LDFLAGS = $(CPUFLAGS) -nostartfiles -L./libopencm3/lib -Wl,-T,$(LDSCRIPT) -Wl,-Map,$(TARGET).map -specs=nano.specs -u _printf_float -ffast-math
+LDLIBS = -lopencm3_stm32g4 -lc -lnosys -lm
 
 CSRC = $(wildcard modules/*.c) main.c 
 OBJ = $(patsubst %.c,build/%.o,$(CSRC))

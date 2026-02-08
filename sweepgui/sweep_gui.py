@@ -115,8 +115,8 @@ class SweepGUI(QMainWindow):
         
         # Sampling controls
         self.sample_rate_box = QDoubleSpinBox()
-        self.sample_rate_box.setRange(1000, 1000000)
-        self.sample_rate_box.setValue(2833.3333)
+        self.sample_rate_box.setRange(1, 10000)
+        self.sample_rate_box.setValue(1000.0)
         self.sample_rate_box.setDecimals(3)
         self.sample_rate_box.setSuffix(" kHz")
         

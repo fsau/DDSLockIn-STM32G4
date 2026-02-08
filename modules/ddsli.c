@@ -27,6 +27,7 @@
         - Good: could CORDIC two independent phases in one pass
     - OPA preamp and OPA DAC2 output
     - Calibration routines? Internal connect DAC-ADC?
+    - Smooth/piecewise continuous amplitude control
  */
 
 #include "ddsli.h"
@@ -98,27 +99,16 @@ typedef struct {
 // Buffers & globals
 // -----------------------------------------------------------------------------
 
-// #define SKIP_CPU_LC
+#define SINCOS_BUFF_HALVES 3
 
-#define CAPT_BUFF_HALVES 4
 __attribute__((section(".ccm_data")))
 volatile dual_adc_sample_t adc_captbuf[CAPT_BUFF_HALVES * HB_LEN];    
 __attribute__((section(".ccm_data")))         
 volatile cordic_out_sample_t sincos_captbuf[CAPT_BUFF_HALVES * HB_LEN]; 
-
-#ifdef SKIP_CPU_LC
-#define SINCOS_BUFF_HALVES 2
-#define dac_buf sincos_buf
-#else
-#define SINCOS_BUFF_HALVES 3
-volatile dual_adc_sample_t dac_buf[2 * HB_LEN];        
-#endif
-
-volatile cordic_in_phase_t phase_buf[2 * HB_LEN]; 
+volatile dual_adc_sample_t dac_buf[2 * HB_LEN];
+volatile cordic_in_phase_t phase_buf[2 * HB_LEN];
 volatile cordic_out_sample_t sincos_buf[SINCOS_BUFF_HALVES * HB_LEN]; 
-volatile dual_adc_sample_t adc_buf[2 * HB_LEN];      
-
-#define LPF_FIFO_LEN 64U
+volatile dual_adc_sample_t adc_buf[2 * HB_LEN];
 volatile ddsli_output_t lpf_fifo[LPF_FIFO_LEN];
 volatile uint32_t lpf_fifo_wr = 0;
 volatile uint32_t lpf_fifo_rd = 0;
@@ -140,6 +130,7 @@ volatile int *cordic_done_flag_ptr = NULL;
 volatile bool *cordic_busy_flag_ptr = NULL;
 uint32_t ddsli_current_half = 0; // 0 to 6
 bool stop_flag = 0;
+uint8_t capture_buffer = 0;
 
 // -----------------------------------------------------------------------------
 // DDS Phase Vector Generation
@@ -196,7 +187,7 @@ static inline void dds_generate_phase_halfbuffer_idx(
 }
 
 // Frequency management
-static inline void dds_set_frequency(float f, float sweep, float sample_f)
+void dds_set_frequency(float f, float sweep, float sample_f)
 {
     // Calculate phase increment
     volatile dds_phase_inc_t phase_inc = (dds_phase_inc_t)((f * (1ULL << 32)) / sample_f);
@@ -300,7 +291,7 @@ static inline void dds_process_dac_halfbuffer(uint32_t dac_half_idx,
 // -----------------------------------------------------------------------------
 
 // Mix/multiplier + block integrator
-static inline void dds_mixold_adc_sincos(
+static inline void dds_mix_adc_sincos(
     volatile dual_adc_sample_t *adc_src,
     volatile cordic_out_sample_t *sincos_src,
     uint32_t len)
@@ -350,7 +341,7 @@ static inline void dds_capt_adc_sincos(
 }
 
 // Least squares regression with 2 components + DC
-static inline void dds_mix_adc_sincos(
+static inline void dds_lsr_adc_sincos(
     volatile dual_adc_sample_t   *adc_src,
     volatile cordic_out_sample_t *sincos_src,
     uint32_t len)
@@ -448,7 +439,24 @@ static inline void dds_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sincos
     volatile dual_adc_sample_t *adc_src = &adc_buf[((adc_half_idx)%2) * HB_LEN];
     volatile cordic_out_sample_t *sincos_src = &sincos_buf[((sincos_offset)%SINCOS_BUFF_HALVES) * HB_LEN];
 
-    dds_mix_adc_sincos(adc_src, sincos_src, HB_LEN);
+    if(capture_buffer)
+    {
+        if(capture_buffer >= CAPT_BUFF_HALVES)
+            capture_buffer = CAPT_BUFF_HALVES;
+        
+        uint32_t ofs = (CAPT_BUFF_HALVES - capture_buffer)*HB_LEN;
+        for(uint32_t i = 0; i < HB_LEN; i++)
+        {
+            adc_captbuf[ofs+i] = adc_src[i];
+            sincos_captbuf[ofs+i] = sincos_src[i];
+        }
+        dds_lsr_adc_sincos(&adc_captbuf[ofs], &sincos_captbuf[ofs], HB_LEN);
+        capture_buffer--;
+    }
+    else
+    {
+        dds_lsr_adc_sincos(adc_src, sincos_src, HB_LEN);
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -635,6 +643,58 @@ bool ddsli_output_pop(ddsli_output_t *out)
     }
     lpf_fifo_rd = (lpf_fifo_rd + 1) % LPF_FIFO_LEN;
     return true;
+}
+
+/* Trigger a buffer capture for next n frames/half-buffers where
+ * n <= CAPT_BUFF_HALVES
+ */
+void ddsli_capture_buffers(uint8_t n)
+{
+    if (n > CAPT_BUFF_HALVES) {
+        n = CAPT_BUFF_HALVES;
+    }
+    capture_buffer = n;
+}
+
+/* Returns true if capture buffers are ready for reading */
+bool ddsli_capture_ready(void)
+{
+    return (capture_buffer == 0);
+}
+
+/* Reads captured buffers */
+bool ddsli_capture_read(uint32_t *adc, uint32_t *ref)
+{
+    if (capture_buffer != 0) {
+        return false; // Capture not complete
+    }
+    
+    if (adc) {
+        // Copy ADC capture buffer (interleaved 16-bit samples packed in 32-bit words)
+        for (uint32_t i = 0; i < CAPT_BUFF_HALVES * HB_LEN; i++) {
+            adc[i] = adc_captbuf[i].raw;
+        }
+    }
+    
+    if (ref) {
+        // Copy reference (sincos) capture buffer
+        for (uint32_t i = 0; i < CAPT_BUFF_HALVES * HB_LEN; i++) {
+            ref[i] = sincos_captbuf[i].raw;
+        }
+    }
+    
+    return true;
+}
+
+/* Or get the buffer directly (check if it's CCM/RAM) */
+uint32_t *ddsli_get_capt_adc(void)
+{
+    return (uint32_t *)adc_captbuf;
+}
+
+uint32_t *ddsli_get_capt_ref(void)
+{
+    return (uint32_t *)sincos_captbuf;
 }
 
 // Main update routine, runs in low priority ISR for low latency

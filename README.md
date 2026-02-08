@@ -35,7 +35,7 @@ Todo
 - ~~Quite a lot of things: DAC waveform generation (currently uses a AD9833 DDS frequency generator), run the lockin detection/quadrature demodulation in STM32 instead of in the app/GUI, and apply an onboard PLL loop for resonance measurements.~~
 - DDS/Lock-in base done, missing some things (see `ddsli.c`).
 - PLL and application code for controlling the DDS/Lock-in for measurements.
-- Fixing the USB CDC/ADC interface.
+- Fixing the USB CDC/ADC interface, sometime fails.
 - Update `sweepgui` to use the DDS/lock-in.
 - Use CCM RAM where possible
 

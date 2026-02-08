@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/cm3/systick.h>
@@ -7,14 +8,15 @@
 #include <libopencm3/stm32/dac.h>
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/cm3/scb.h>
+#include <libopencm3/cm3/cortex.h>
 
 #include "dma_memcpy.h"
 #include "usbserial.h"
 #include "adc.h"
-#include "spi.h"
 #include "cordic.h"
 #include "dac.h"
 #include "ddsli.h"
+#include "timers.h"
 
 volatile uint32_t angles[100];
 volatile uint32_t results[100] = {0}; // Each angle gives cos and sin (2 results)
@@ -50,79 +52,6 @@ void delay_ms(uint32_t ms)
 void bp_here(void) {__asm__ volatile ("bkpt #0");;}
 
 uint16_t ch0[ADC_BUF_LEN], ch1[ADC_BUF_LEN];
-
-/*
- * Configure timers for DAC (TIM4) and ADC (TIM3)
- *
- * TIM4 provides the DAC timing reference and triggers DAC conversion on the update
- * event. To compensate for the DAC internal one-cycle pipeline latency, the DAC
- * DMA request is sourced from a TIM4 compare event rather than the DAC’s default
- * DMA request source.
- *
- * TIM3 is configured as a slave only for startup synchronization: it starts on
- * the TIM4 update trigger to guarantee a deterministic phase relationship at
- * t = 0. After startup, TIM3 runs freely and independently.
- *
- * Both timers are programmed with identical prescaler and auto-reload values.
- * These parameters must always match and must not be modified while running,
- * as doing so breaks the DAC/ADC phase relationship.
- *
- * Optional PWM outputs are enabled for external timing observation and debugging.
- */
-void load_adc_dac_timer(void)
-{
-    rcc_periph_clock_enable(RCC_TIM4);  // Master timer: DAC
-    rcc_periph_clock_enable(RCC_TIM3);  // Slave timer: ADC
-    
-    uint32_t timer_clk = 170000000;     // APB2 timer clock (170 MHz)
-    uint32_t adc_rate = 1000000;        // 2 MSa/s
-    uint32_t prescaler = 0;             // no prescaler
-    uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
-    
-    timer_set_prescaler(TIM4, prescaler);
-    timer_set_period(TIM4, arr);
-    timer_set_master_mode(TIM4, TIM_CR2_MMS_UPDATE);
-    
-    gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO9);
-    gpio_set_output_options(GPIOB,
-                            GPIO_OTYPE_PP,
-                            GPIO_OSPEED_2MHZ,
-                            GPIO9);
-    gpio_set_af(GPIOB, GPIO_AF2, GPIO9);
-    timer_set_oc_mode(TIM4, TIM_OC4, TIM_OCM_PWM1);
-    timer_set_oc_value(TIM4, TIM_OC4, arr / 2); // 50% duty
-    timer_enable_oc_output(TIM4, TIM_OC4); // Debug PWM output
-    TIM_DIER(TIM4) |= TIM_DIER_CC4DE; // Enable DMA output for DAC
-
-    timer_set_prescaler(TIM3, prescaler);
-    timer_set_period(TIM3, arr);
-    timer_set_master_mode(TIM3, TIM_CR2_MMS_UPDATE);
-    timer_slave_set_mode(TIM3,TIM_SMCR_SMS_TM); // Starts after TIM4 update
-    timer_slave_set_trigger(TIM3,TIM_SMCR_TS_ITR3);
-
-    gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO0);
-    gpio_set_output_options(GPIOB,
-                            GPIO_OTYPE_PP,
-                            GPIO_OSPEED_2MHZ,
-                            GPIO0);
-    gpio_set_af(GPIOB, GPIO_AF2, GPIO0);
-    timer_set_oc_mode(TIM3, TIM_OC4, TIM_OCM_PWM1);
-    timer_set_oc_mode(TIM3, TIM_OC3, TIM_OCM_PWM1);
-    timer_set_oc_value(TIM3, TIM_OC4, arr / 2); // Tune ADC timing here
-    timer_set_oc_value(TIM3, TIM_OC3, arr / 2); // Debug PWM duty
-    timer_enable_oc_output(TIM3, TIM_OC3); // Debug PWM output
-    timer_enable_oc_output(TIM3, TIM_OC4); // ADC
-}
-
-void start_adc_dac_timer(void)
-{
-    timer_enable_counter(TIM4);
-}
-
-void stop_adc_dac_timer(void)
-{
-    timer_disable_counter(TIM4);
-}
 
 void jump_to_dfu(void)
 {
@@ -201,7 +130,6 @@ int main(void)
 
     dma_memcpy_init();
     usbserial_init();
-    spi_setup();
     load_adc_dac_timer();
 
 #ifdef LEGACY_MODE
@@ -241,7 +169,7 @@ int main(void)
     {
         uint8_t buf[64];
         uint8_t len = usbserial_read_rx(buf, 64);
-        usbserial_send_tx(buf,len);
+        // usbserial_send_tx(buf,len);
 
         for(uint32_t i = 0; i < len; i++)
         {
@@ -260,14 +188,21 @@ int main(void)
                         cmd_digits = 0;
                     }
                     else if(buf[i] == 'M' || buf[i] == 'm') {
-                        // TODO: new capture ADC buffer
+                        ddsli_capture_buffers(4);
+                        while(!ddsli_capture_ready()) __asm__("nop");
+                        usbserial_send_tx((uint8_t*)ddsli_get_capt_adc(),4*4*HB_LEN);
+                        // usbserial_send_tx((uint8_t*)ddsli_get_capt_adc()+2*4*HB_LEN,2*4*HB_LEN);
                     }
                     else if(buf[i] == 'D' || buf[i] == 'd') {
                         // Jump to DFU bootloader
                         // jump_to_dfu();
                     }
                     else if(buf[i] == 'S' || buf[i] == 's') {
-                        // stop_adc_dac_timer();
+                        stop_adc_dac_timer();
+                    }
+                    else if(buf[i] == 'R' || buf[i] == 'r') {
+                        stop_adc_dac_timer();
+                        start_adc_dac_timer();
                     }
                     break;
                 case CMD_FREQ:
@@ -279,6 +214,7 @@ int main(void)
                         // Non-digit or max digits reached - execute command
                         // freqw = cmd_value;
                         // ad9833_set_freq_word(freqw);
+                        dds_set_frequency((float)cmd_value/10.73741824f, 0.0f, 1000000);
                         
                         // Reset to idle state
                         cmd_state = CMD_IDLE;
@@ -325,32 +261,58 @@ int main(void)
                 acc_ch1_sin += output.chB[1];
                 n++;
 
-                if(n >= 500) {
-                    // gpio_toggle(GPIOC, GPIO6);
-                    acc_ch0_cos /= n;
-                    acc_ch0_sin /= n;
-                    acc_ch1_cos /= n;
-                    acc_ch1_sin /= n;
+                // if(n >= 500) {
+                //     // gpio_toggle(GPIOC, GPIO6);
+                //     acc_ch0_cos /= n;
+                //     acc_ch0_sin /= n;
+                //     acc_ch1_cos /= n;
+                //     acc_ch1_sin /= n;
 
-                    uint8_t outbuf[100];
-                    uint8_t s = snprintf(outbuf, 100,
-                        "CH0 COS: %f SIN: %f | CH1 COS: %f SIN: %f\r\n",
-                        (float)acc_ch0_cos,
-                        (float)acc_ch0_sin,
-                        (float)acc_ch1_cos,
-                        (float)acc_ch1_sin
-                    );
+                //     uint8_t outbuf[128];
+                //     // uint8_t s = snprintf(outbuf, 100,
+                //     //     "CH0 COS: %f SIN: %f | CH1 COS: %f SIN: %f\r\n",
+                //     //     (float)acc_ch0_cos,
+                //     //     (float)acc_ch0_sin,
+                //     //     (float)acc_ch1_cos,
+                //     //     (float)acc_ch1_sin
+                //     // );
+
+                //     /* Amplitudes */
+                //     float amp0 = sqrtf(acc_ch0_cos*acc_ch0_cos + acc_ch0_sin*acc_ch0_sin);
+                //     float amp1 = sqrtf(acc_ch1_cos*acc_ch1_cos + acc_ch1_sin*acc_ch1_sin);
+
+                //     /* Phases (radians) */
+                //     float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
+                //     float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
+
+                //     /* Relative quantities */
+                //     float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
+                //     float dphi = phi0 - phi1;
+
+                //     /* Wrap to [-pi, pi] */
+                //     if (dphi >  M_PI) dphi -= 2.0f*M_PI;
+                //     if (dphi < -M_PI) dphi += 2.0f*M_PI;
+
+                //     uint8_t s = snprintf(
+                //         (char *)outbuf, sizeof(outbuf),
+                //         "CH0 %6.5f V %4.3f° | CH1 %6.5f V %4.3f° | "
+                //         "rel %7.5f %7.3f°\r\n",
+                //         amp0/3510.571, phi0 * (180.0f/M_PI),
+                //         amp1/3510.571, phi1 * (180.0f/M_PI),
+                //         amp_ratio,
+                //         dphi * (180.0f/M_PI)
+                //     );
                         
-                    usbserial_send_tx(outbuf, s);
-                    // uint8_t testb[] = "test ";
-                    // usbserial_send_tx(testb,sizeof(testb));
+                //     usbserial_send_tx(outbuf, s);
+                //     // uint8_t testb[] = "test ";
+                //     // usbserial_send_tx(testb,sizeof(testb));
 
-                    acc_ch0_cos = 0;
-                    acc_ch0_sin = 0;
-                    acc_ch1_cos = 0;
-                    acc_ch1_sin = 0;
-                    n = 0;
-                }
+                //     acc_ch0_cos = 0;
+                //     acc_ch0_sin = 0;
+                //     acc_ch1_cos = 0;
+                //     acc_ch1_sin = 0;
+                //     n = 0;
+                // }
             }
         }
 	}

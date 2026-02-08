@@ -108,17 +108,21 @@ class SerialSweep:
             if len(raw) != 1024 * 4:
                 return None, "Short read"
 
-            # Convert data
-            raw_u8 = np.frombuffer(raw, dtype=np.uint8)
-            data = raw_u8[0::2].astype(np.int16) + \
-                   (raw_u8[1::2].astype(np.int16) << 8)
-
-            if data.size != 2048:
+            # Convert to 32-bit words (little-endian)
+            raw_u32 = np.frombuffer(raw, dtype=np.uint32)
+            
+            if raw_u32.size != 1024:
                 return None, "Frame error"
-
-            half = data.size // 2
-            ch0 = (data[:half]-2048)*3.3/4096  # V_dut
-            ch1 = (data[half:]-2048)*3.3/4096  # I_ref
+            
+            # Extract 16-bit samples from 32-bit words
+            # ADC1 (ch0): lower 16 bits
+            # ADC2 (ch1): upper 16 bits
+            ch0_samples = (raw_u32 & 0xFFFF).astype(np.int16)  # Extract lower 16 bits as int16
+            ch1_samples = ((raw_u32 >> 16) & 0xFFFF).astype(np.int16)  # Extract upper 16 bits as int16
+            
+            # Convert to voltage (12-bit ADC, 0-3.3V range)
+            ch0 = (ch0_samples - 2048) * 3.3 / 4096  # V_dut
+            ch1 = (ch1_samples - 2048) * 3.3 / 4096  # I_ref
             
             freq_hz = fw / (2**28) * 25e6
             
