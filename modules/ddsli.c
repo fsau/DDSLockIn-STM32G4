@@ -54,6 +54,7 @@ typedef struct {
     dds_phase_t               phase;               // Current phase accumulator
     dds_phase_inc_t           phase_inc;           // Phase increment per sample
     dds_phase_inc_delta_t     phase_inc_delta;     // Q32.32 frequency slope
+    float                     sample_rate; // For frequency calculations
 } dds_phase_ctrl_t;
 
 // Dual ADC sample format (STM32 dual ADC interleaved). Used for DAC too.
@@ -121,7 +122,7 @@ dds_out_ctrl_t dds_linear_comb = {
     .B2 = 0x7FFF,
     .output_scale = 1
 };
-dds_phase_ctrl_t phase_dds;
+volatile dds_phase_ctrl_t phase_dds;
 volatile int *adc_half_flag_ptr = NULL;
 volatile int *adc_full_flag_ptr = NULL;
 volatile int *dac_half_flag_ptr = NULL;
@@ -144,7 +145,7 @@ static inline void dds_generate_phase_halfbuffer(
 {
     dds_phase_t phase = ctrl->phase;           
     dds_phase_inc_t inc = ctrl->phase_inc;     
-    const dds_phase_inc_delta_t slope = ctrl->phase_inc_delta; 
+    dds_phase_inc_delta_t slope = ctrl->phase_inc_delta; 
 
     for (uint32_t i = 0; i < len; i++) {
         inc += slope;
@@ -192,6 +193,7 @@ void dds_set_frequency(float f, float sweep, float sample_f)
     // Calculate phase increment
     volatile dds_phase_inc_t phase_inc = (dds_phase_inc_t)((f * (1ULL << 32)) / sample_f);
     phase_dds.phase_inc = phase_inc * (1ULL << 32);
+    phase_dds.sample_rate = sample_f;
 
     // Calculate frequency sweep parameters
     if (sweep != 0.0f) {
@@ -422,6 +424,8 @@ static inline void dds_lsr_adc_sincos(
 
     uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
 
+    lpf_fifo[lpf_fifo_wr].frequency = (float)phase_dds.phase_inc;
+
     lpf_fifo[lpf_fifo_wr].chA[0] = IA;
     lpf_fifo[lpf_fifo_wr].chA[1] = QA;
     lpf_fifo[lpf_fifo_wr].chA[2] = DCA;
@@ -507,8 +511,9 @@ void ddsli_setup(void)
     // Initialize DDS phase
     phase_dds.phase = 0;
     phase_dds.phase_inc = (1ULL << 32) * 
-    (uint64_t)((32767.75f * (1ULL << 32)) / 1000000.0f); 
-    // phase_dds.phase_inc_delta = 1;
+    (uint64_t)((32768.0f * (1ULL << 32)) / 1000000.0f); 
+    phase_dds.phase_inc_delta = 1000000;
+    phase_dds.sample_rate = 1e6;
     
     // Generate initial phases for both halves
     dds_generate_phase_halfbuffer_idx(0);

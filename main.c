@@ -168,6 +168,12 @@ int main(void)
 	while (1)
     {
         uint8_t buf[64];
+        static float acc_ch0_cos = 0;
+        static float acc_ch0_sin = 0;
+        static float acc_ch1_cos = 0;
+        static float acc_ch1_sin = 0;
+        static float acc_f = 0;
+        static int32_t n = 0;
         uint8_t len = usbserial_read_rx(buf, 64);
         // usbserial_send_tx(buf,len);
 
@@ -194,8 +200,51 @@ int main(void)
                         // usbserial_send_tx((uint8_t*)ddsli_get_capt_adc()+2*4*HB_LEN,2*4*HB_LEN);
                     }
                     else if(buf[i] == 'D' || buf[i] == 'd') {
-                        // Jump to DFU bootloader
-                        // jump_to_dfu();
+                        if(n >= 50) {
+                            acc_ch0_cos /= n;
+                            acc_ch0_sin /= n;
+                            acc_ch1_cos /= n;
+                            acc_ch1_sin /= n;
+
+                            uint8_t outbuf[128];
+
+                            float f = acc_f/(float)(1.844674407371e13);
+
+                            /* Amplitudes */
+                            float amp0 = sqrtf(acc_ch0_cos*acc_ch0_cos + acc_ch0_sin*acc_ch0_sin);
+                            float amp1 = sqrtf(acc_ch1_cos*acc_ch1_cos + acc_ch1_sin*acc_ch1_sin);
+
+                            /* Phases (radians) */
+                            float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
+                            float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
+
+                            /* Relative quantities */
+                            float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
+                            float dphi = phi0 - phi1;
+
+                            /* Wrap to [-pi, pi] */
+                            if (dphi >  M_PI) dphi -= 2.0f*M_PI;
+                            if (dphi < -M_PI) dphi += 2.0f*M_PI;
+
+                            uint8_t s = snprintf(
+                                (char *)outbuf, sizeof(outbuf),
+                                "f %.3f Hz | CH0 %6.5f V %4.3f° | CH1 %6.5f V %4.3f° | "
+                                "rel %7.5f %7.3f°\r\n", f,
+                                amp0/3510.571, phi0 * (180.0f/M_PI),
+                                amp1/3510.571, phi1 * (180.0f/M_PI),
+                                amp_ratio,
+                                dphi * (180.0f/M_PI)
+                            );
+                                
+                            usbserial_send_tx(outbuf, s);
+
+                            acc_ch0_cos = 0;
+                            acc_ch0_sin = 0;
+                            acc_ch1_cos = 0;
+                            acc_ch1_sin = 0;
+                            acc_f = 0;
+                            n = 0;
+                        }
                     }
                     else if(buf[i] == 'S' || buf[i] == 's') {
                         stop_adc_dac_timer();
@@ -245,13 +294,6 @@ int main(void)
         if((clock_ticks/2) != lasttick)
         {
             lasttick = clock_ticks/2;
-            // ad9833_set_freq_word(freqw);
-
-            static float acc_ch0_cos = 0;
-            static float acc_ch0_sin = 0;
-            static float acc_ch1_cos = 0;
-            static float acc_ch1_sin = 0;
-            static int32_t n = 0;
             ddsli_output_t output;
             while(ddsli_output_pop(&output))
             {
@@ -259,60 +301,8 @@ int main(void)
                 acc_ch0_sin += output.chA[1];
                 acc_ch1_cos += output.chB[0];
                 acc_ch1_sin += output.chB[1];
+                acc_f = output.frequency;
                 n++;
-
-                // if(n >= 500) {
-                //     // gpio_toggle(GPIOC, GPIO6);
-                //     acc_ch0_cos /= n;
-                //     acc_ch0_sin /= n;
-                //     acc_ch1_cos /= n;
-                //     acc_ch1_sin /= n;
-
-                //     uint8_t outbuf[128];
-                //     // uint8_t s = snprintf(outbuf, 100,
-                //     //     "CH0 COS: %f SIN: %f | CH1 COS: %f SIN: %f\r\n",
-                //     //     (float)acc_ch0_cos,
-                //     //     (float)acc_ch0_sin,
-                //     //     (float)acc_ch1_cos,
-                //     //     (float)acc_ch1_sin
-                //     // );
-
-                //     /* Amplitudes */
-                //     float amp0 = sqrtf(acc_ch0_cos*acc_ch0_cos + acc_ch0_sin*acc_ch0_sin);
-                //     float amp1 = sqrtf(acc_ch1_cos*acc_ch1_cos + acc_ch1_sin*acc_ch1_sin);
-
-                //     /* Phases (radians) */
-                //     float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
-                //     float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
-
-                //     /* Relative quantities */
-                //     float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
-                //     float dphi = phi0 - phi1;
-
-                //     /* Wrap to [-pi, pi] */
-                //     if (dphi >  M_PI) dphi -= 2.0f*M_PI;
-                //     if (dphi < -M_PI) dphi += 2.0f*M_PI;
-
-                //     uint8_t s = snprintf(
-                //         (char *)outbuf, sizeof(outbuf),
-                //         "CH0 %6.5f V %4.3f° | CH1 %6.5f V %4.3f° | "
-                //         "rel %7.5f %7.3f°\r\n",
-                //         amp0/3510.571, phi0 * (180.0f/M_PI),
-                //         amp1/3510.571, phi1 * (180.0f/M_PI),
-                //         amp_ratio,
-                //         dphi * (180.0f/M_PI)
-                //     );
-                        
-                //     usbserial_send_tx(outbuf, s);
-                //     // uint8_t testb[] = "test ";
-                //     // usbserial_send_tx(testb,sizeof(testb));
-
-                //     acc_ch0_cos = 0;
-                //     acc_ch0_sin = 0;
-                //     acc_ch1_cos = 0;
-                //     acc_ch1_sin = 0;
-                //     n = 0;
-                // }
             }
         }
 	}
