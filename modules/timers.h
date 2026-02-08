@@ -21,7 +21,7 @@
  * Optional PWM outputs are enabled for external timing observation and debugging.
  */
 
-void load_adc_dac_timer(void);
-void start_adc_dac_timer(void);
-void stop_adc_dac_timer(void);
-void adjust_adc_dac_timer(uint32_t rate, uint8_t prescaler);
+void adc_dac_timer_load(void);
+void adc_dac_timer_start(void);
+void adc_dac_timer_stop(void);
+void adc_dac_timer_adjust(uint32_t rate, uint8_t prescaler);

@@ -134,4 +134,5 @@ SECTIONS
 	end = .;
 }
 
-PROVIDE(_stack = ORIGIN(ram) + LENGTH(ram));
+/* Stack at top of CCM */
+PROVIDE(_stack = ORIGIN(ccm) + LENGTH(ccm));

@@ -21,20 +21,36 @@
  */
 
 /* --------------------------------------------------------------------------
- * Public output sample type
+ * Public types & definitions
  * -------------------------------------------------------------------------- */
 
-/* Demodulated / filtered output sample. */
+// int32 full-scale (2^31) corresponds to pi radians, range: [-pi, +pi)
+typedef int64_t  dds_phase_t; // Q32.32
+typedef int64_t  dds_phase_inc_t; // Q32.32 (fractional part = acc)
+typedef int64_t  dds_phase_inc_delta_t; // Q32.32
+
 typedef struct {
-    float frequency;
-    uint16_t dds_amplitude;
+    dds_phase_t               phase;           // Current phase accumulator
+    dds_phase_inc_t           phase_inc;       // Phase increment per sample
+    dds_phase_inc_delta_t     phase_inc_delta; // Q32.32 frequency slope
+    // int64_t                   sample_rate;     // For frequency calculations
+} dds_phase_ctrl_t;
+
+typedef struct {
+    int16_t A1;           // Coefficient for sin (Q1.15)
+    int16_t B1;           // Coefficient for cos (Q1.15)
+    int16_t A2;           // Coefficient for sin (Q1.15)
+    int16_t B2;           // Coefficient for cos (Q1.15)
+    int16_t output_scale; // Additional scaling
+} dds_out_ctrl_t;
+
+/* Demodulated output sample. */
+typedef struct {
+    dds_phase_ctrl_t frequency;
+    dds_out_ctrl_t dds_amplitude;
     float chA[3];
     float chB[3];
 } ddsli_output_t;
-
-/* --------------------------------------------------------------------------
- * Setup / Initialization
- * -------------------------------------------------------------------------- */
 
 // Samples per half-buffer (total buffer size = 2 * HB_LEN * sizeof(type))
 #define HB_LEN 256U
@@ -43,7 +59,11 @@ typedef struct {
 #define LPF_FIFO_LEN 64U
 
 // ADC/reference capture half-buffers
-#define CAPT_BUFF_HALVES 4
+#define CAPT_BUFF_HALVES 3
+
+/* --------------------------------------------------------------------------
+ * Setup / Initialization
+ * -------------------------------------------------------------------------- */
 
 /* Initialize internal state, buffers, and peripherals.
  * Must be called once before any processing.

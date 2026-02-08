@@ -4,7 +4,7 @@ A firmware and toolset for generating and analyzing frequency sweeps on an STM32
 
 Contents
 - `main.c` — firmware entry point
-- `modules/` — firmware modules (AD9833 driver, ADC, DAC, SPI, USB serial, utilities)
+- `modules/` — firmware modules (ADC, DAC, SPI, USB serial, utilities)
 - `libopencm3/` — libopencm3 firmware library (submodule)
 - `sweepgui/` — Python GUI and helper scripts for running and saving sweeps
 
