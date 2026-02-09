@@ -493,8 +493,8 @@ static inline void ddsli_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sinc
         //     sincos_captbuf[ofs+i] = sincos_src[i];
         // }
 
-        dma_memcpy32((uint32_t*)&adc_captbuf[ofs]+CCM_ALIAS_OFFS, (uint32_t*)&adc_src, HB_LEN);
-        // dma_memcpy32((uint32_t*)&sincos_captbuf[ofs]+CCM_ALIAS_OFFS, (uint32_t*)&sincos_src, HB_LEN);
+        dma_memcpy32((uint32_t*)CCM_ALIAS(&adc_captbuf[ofs]), (uint32_t*)adc_src, HB_LEN);
+        dma_memcpy32((uint32_t*)CCM_ALIAS(&sincos_captbuf[ofs]), (uint32_t*)sincos_src, HB_LEN);
         capture_buffer--;
     }
 

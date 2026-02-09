@@ -4,6 +4,7 @@
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/cm3/nvic.h>
 #include <string.h>
+#include "utils.h"
 
 #define DMA_MEMCPY_DMA       DMA1
 #define DMA_MEMCPY_CHANNEL   DMA_CHANNEL5
@@ -24,10 +25,10 @@ typedef struct {
     volatile bool done;
 } dma_memcpy_req_t;
 
-static dma_memcpy_req_t fifo[DMA_MEMCPY_FIFO_DEPTH];
-static volatile uint8_t fifo_head = 0;
-static volatile uint8_t fifo_tail = 0;
-static volatile uint8_t fifo_count = 0;
+static dma_memcpy_req_t dma_fifo[DMA_MEMCPY_FIFO_DEPTH];
+static volatile uint8_t dma_fifo_head = 0;
+static volatile uint8_t dma_fifo_tail = 0;
+static volatile uint8_t dma_fifo_count = 0;
 static volatile uint16_t dma_seq = 1; /* 0 reserved = invalid */
 static volatile bool dma_busy = false;
 
@@ -73,19 +74,17 @@ bool dma_memcpy_init(void)
 
 static void dma_memcpy_start_next(void)
 {
-    if (fifo_count == 0) {
+    if (dma_fifo_count == 0) {
         dma_busy = false;
         return;
     }
 
-    dma_memcpy_req_t *r = &fifo[fifo_tail];
+    dma_memcpy_req_t *r = &dma_fifo[dma_fifo_tail];
 
     dma_disable_channel(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL);
-
-    dma_set_peripheral_address(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL,
-                               (uint32_t)r->src);
-    dma_set_memory_address(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL,
-                            (uint32_t)r->dest);
+    
+    dma_set_peripheral_address(DMA1, DMA_CHANNEL5, (uint32_t)DMA_ADDR(r->dest));
+    dma_set_memory_address(DMA1, DMA_CHANNEL5, (uint32_t)DMA_ADDR(r->src));
     dma_set_number_of_data(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL,
                            r->words);
 
@@ -110,11 +109,11 @@ uint32_t dma_memcpy32(volatile uint32_t *dest,
     if (size == 0)
         return 0;
 
-    if (fifo_count >= DMA_MEMCPY_FIFO_DEPTH)
+    if (dma_fifo_count >= DMA_MEMCPY_FIFO_DEPTH)
         return 0;
 
-    uint8_t slot = fifo_head;
-    dma_memcpy_req_t *r = &fifo[slot];
+    uint8_t slot = dma_fifo_head;
+    dma_memcpy_req_t *r = &dma_fifo[slot];
 
     r->dest  = dest;
     r->src   = src;
@@ -125,8 +124,8 @@ uint32_t dma_memcpy32(volatile uint32_t *dest,
     if (dma_seq == 0)
         dma_seq = 1;
 
-    fifo_head = (fifo_head + 1) % DMA_MEMCPY_FIFO_DEPTH;
-    fifo_count++;
+    dma_fifo_head = (dma_fifo_head + 1) % DMA_MEMCPY_FIFO_DEPTH;
+    dma_fifo_count++;
 
     if (!dma_busy)
         dma_memcpy_start_next();
@@ -145,7 +144,7 @@ bool dma_memcpy_is_complete(uint32_t id)
     if (slot >= DMA_MEMCPY_FIFO_DEPTH)
         return false;
 
-    dma_memcpy_req_t *r = &fifo[slot];
+    dma_memcpy_req_t *r = &dma_fifo[slot];
 
     /* Sequence mismatch = overwritten or invalid */
     if (r->seq != seq)
@@ -159,11 +158,11 @@ void dma1_channel5_isr(void)
     if (dma_get_interrupt_flag(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL, DMA_TCIF)) {
         dma_clear_interrupt_flags(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL, DMA_TCIF);
 
-        dma_memcpy_req_t *r = &fifo[fifo_tail];
+        dma_memcpy_req_t *r = &dma_fifo[dma_fifo_tail];
         r->done = true;
 
-        fifo_tail = (fifo_tail + 1) % DMA_MEMCPY_FIFO_DEPTH;
-        fifo_count--;
+        dma_fifo_tail = (dma_fifo_tail + 1) % DMA_MEMCPY_FIFO_DEPTH;
+        dma_fifo_count--;
 
         dma_memcpy_start_next();
     }

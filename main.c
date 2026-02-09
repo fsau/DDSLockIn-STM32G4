@@ -161,103 +161,101 @@ int main(void)
                         }
                         else if(buf[i] == 'D' || buf[i] == 'd')
                         {
-                            ddsli_output_t output;
-                            while(ddsli_output_pop(&output))
+                            while(n <= 50)
                             {
-                                acc_ch0_cos += output.chA[0];
-                                acc_ch0_sin += output.chA[1];
-                                acc_ch1_cos += output.chB[0];
-                                acc_ch1_sin += output.chB[1];
-                                acc_f += output.frequency.phase_inc>>30;
-                                n++;
+                                ddsli_output_t output;
+                                if(ddsli_output_pop(&output))
+                                {
+                                    acc_ch0_cos += output.chA[0];
+                                    acc_ch0_sin += output.chA[1];
+                                    acc_ch1_cos += output.chB[0];
+                                    acc_ch1_sin += output.chB[1];
+                                    acc_f += output.frequency.phase_inc>>30;
+                                    n++;
+                                }
                             }
-                            if(n >= 50) {
-                                acc_ch0_cos /= n;
-                                acc_ch0_sin /= n;
-                                acc_ch1_cos /= n;
-                                acc_ch1_sin /= n;
-                                acc_f /= 4*n;
 
-                                uint8_t outbuf[128];
+                            acc_ch0_cos /= n;
+                            acc_ch0_sin /= n;
+                            acc_ch1_cos /= n;
+                            acc_ch1_sin /= n;
+                            acc_f /= 4*n;
 
-                                double f = (double)acc_f/(4294.96f);
+                            uint8_t outbuf[128];
 
-                                /* Amplitudes */
-                                float amp0 = sqrtf(acc_ch0_cos*acc_ch0_cos + acc_ch0_sin*acc_ch0_sin);
-                                float amp1 = sqrtf(acc_ch1_cos*acc_ch1_cos + acc_ch1_sin*acc_ch1_sin);
+                            double f = (double)acc_f/(4294.96f);
 
-                                /* Phases (radians) */
-                                float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
-                                float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
+                            /* Amplitudes */
+                            float amp0 = sqrtf(acc_ch0_cos*acc_ch0_cos + acc_ch0_sin*acc_ch0_sin);
+                            float amp1 = sqrtf(acc_ch1_cos*acc_ch1_cos + acc_ch1_sin*acc_ch1_sin);
 
-                                /* Relative quantities */
-                                float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
-                                float dphi = phi0 - phi1;
+                            /* Phases (radians) */
+                            float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
+                            float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
 
-                                /* Wrap to [-pi, pi] */
-                                if (dphi >  M_PI) dphi -= 2.0f*M_PI;
-                                if (dphi < -M_PI) dphi += 2.0f*M_PI;
+                            /* Relative quantities */
+                            float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
+                            float dphi = phi0 - phi1;
 
-                                char *p = (char *)outbuf;
+                            /* Wrap to [-pi, pi] */
+                            if (dphi >  M_PI) dphi -= 2.0f*M_PI;
+                            if (dphi < -M_PI) dphi += 2.0f*M_PI;
 
-                                /* f %.3f Hz */
-                                *p++ = 'f'; *p++ = ' ';
-                                p = fmt_f(p, f, 0, 3);
-                                *p++ = ' '; *p++ = 'H'; *p++ = 'z';
+                            char *p = (char *)outbuf;
 
-                                /* | CH0 %6.5f V %4.3f° */
-                                *p++ = ' '; *p++ = '|'; *p++ = ' ';
-                                *p++ = 'C'; *p++ = 'H'; *p++ = '0'; *p++ = ' ';
-                                p = fmt_f(p, amp0 / 3510.571f, 6, 5);
-                                *p++ = ' '; *p++ = 'V'; *p++ = ' ';
-                                p = fmt_f(p, phi0 * (180.0f / M_PI), 4, 3);
-                                *p++ = 0xC2; *p++ = 0xB0;
+                            /* f %.3f Hz */
+                            *p++ = 'f'; *p++ = ' ';
+                            p = fmt_f(p, f, 0, 3);
+                            *p++ = ' '; *p++ = 'H'; *p++ = 'z';
 
-                                /* | CH1 %6.5f V %4.3f° */
-                                *p++ = ' '; *p++ = '|'; *p++ = ' ';
-                                *p++ = 'C'; *p++ = 'H'; *p++ = '1'; *p++ = ' ';
-                                p = fmt_f(p, amp1 / 3510.571f, 6, 5);
-                                *p++ = ' '; *p++ = 'V'; *p++ = ' ';
-                                p = fmt_f(p, phi1 * (180.0f / M_PI), 4, 3);
-                                *p++ = 0xC2; *p++ = 0xB0;
+                            /* | CH0 %6.5f V %4.3f° */
+                            *p++ = ' '; *p++ = '|'; *p++ = ' ';
+                            *p++ = 'C'; *p++ = 'H'; *p++ = '0'; *p++ = ' ';
+                            p = fmt_f(p, amp0 / 3510.571f, 6, 5);
+                            *p++ = ' '; *p++ = 'V'; *p++ = ' ';
+                            p = fmt_f(p, phi0 * (180.0f / M_PI), 4, 3);
+                            *p++ = 0xC2; *p++ = 0xB0;
 
-                                /* | rel %7.5f %7.3f° */
-                                *p++ = ' '; *p++ = '|'; *p++ = ' ';
-                                *p++ = 'r'; *p++ = 'e'; *p++ = 'l'; *p++ = ' ';
-                                p = fmt_f(p, amp_ratio, 7, 5);
-                                *p++ = ' ';
-                                p = fmt_f(p, dphi * (180.0f / M_PI), 7, 3);
-                                *p++ = 0xC2; *p++ = 0xB0;
+                            /* | CH1 %6.5f V %4.3f° */
+                            *p++ = ' '; *p++ = '|'; *p++ = ' ';
+                            *p++ = 'C'; *p++ = 'H'; *p++ = '1'; *p++ = ' ';
+                            p = fmt_f(p, amp1 / 3510.571f, 6, 5);
+                            *p++ = ' '; *p++ = 'V'; *p++ = ' ';
+                            p = fmt_f(p, phi1 * (180.0f / M_PI), 4, 3);
+                            *p++ = 0xC2; *p++ = 0xB0;
 
-                                /* CRLF */
-                                *p++ = '\r';
-                                *p++ = '\n';
+                            /* | rel %7.5f %7.3f° */
+                            *p++ = ' '; *p++ = '|'; *p++ = ' ';
+                            *p++ = 'r'; *p++ = 'e'; *p++ = 'l'; *p++ = ' ';
+                            p = fmt_f(p, amp_ratio, 7, 5);
+                            *p++ = ' ';
+                            p = fmt_f(p, dphi * (180.0f / M_PI), 7, 3);
+                            *p++ = 0xC2; *p++ = 0xB0;
 
-                                uint8_t s = p - (char *)outbuf;
+                            /* CRLF */
+                            *p++ = '\r';
+                            *p++ = '\n';
 
-                                usbserial_send_tx(outbuf, s);
+                            uint8_t s = p - (char *)outbuf;
 
-                                acc_ch0_cos = 0;
-                                acc_ch0_sin = 0;
-                                acc_ch1_cos = 0;
-                                acc_ch1_sin = 0;
-                                acc_f = 0;
-                                n = 0;
-                            }
+                            usbserial_send_tx(outbuf, s);
+
+                            acc_ch0_cos = 0;
+                            acc_ch0_sin = 0;
+                            acc_ch1_cos = 0;
+                            acc_ch1_sin = 0;
+                            acc_f = 0;
+                            n = 0;
                         }
                         else if(buf[i] == 'P' || buf[i] == 'p')
                         {
-                            static uint32_t dcnt = 0;
+                            uint32_t dcnt = 0;
                             ddsli_output_t buf[16];
-                            while(ddsli_output_pop(&buf[dcnt]))
+                            while(dcnt < 16)
                             {
-                                dcnt=(dcnt+1)%16;
-                                if(dcnt==0)
-                                {
-                                    usbserial_send_tx((uint8_t*)buf, sizeof(buf));
-                                    break;
-                                }
+                                if(ddsli_output_pop(&buf[dcnt])) dcnt++;
                             }
+                            usbserial_send_tx((uint8_t*)buf, sizeof(buf));
                         }
                         else if(buf[i] == 'S' || buf[i] == 's')
                         {

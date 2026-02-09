@@ -5,8 +5,17 @@
 
 /* Device-specific CCM addresses */
 #define CCM_BASE        0x10000000UL
-#define CCM_ALIAS_BASE  0x20005800UL   /* adjust per RM */
-#define CCM_ALIAS_OFFS  (CCM_ALIAS_BASE - CCM_BASE)
+#define CCM_END         0x10002800UL
+#define CCM_ALIAS_BASE  0x20005800UL
+
+#define CCM_ALIAS(p) \
+    ((void *)((uintptr_t)(p) - CCM_BASE + CCM_ALIAS_BASE))
+    
+#define DMA_ADDR(p) ( \
+    (((uintptr_t)(p) >= CCM_BASE) && \
+        ((uintptr_t)(p) <  CCM_END)) \
+        ? (void *)((uintptr_t)(p) - CCM_BASE + CCM_ALIAS_BASE) \
+        : (void *)(p) )
 
 // Helper function to enable and set priority for DMA channel
 void dma_channel_enable_irq_with_priority(uint32_t dma_channel, uint8_t priority);
