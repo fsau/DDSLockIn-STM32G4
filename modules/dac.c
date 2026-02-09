@@ -1,7 +1,3 @@
-/* Minimal DAC circular DMA output for STM32G4 + libopencm3
- * TIM6 trigger -> DAC (via TRGO) with DMA circular moving samples from memory
- */
-
 #include "dac.h"
 #include "utils.h"
 #include <libopencm3/stm32/rcc.h>
@@ -47,7 +43,7 @@ void dac_init(void)
     dac_disable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
     dac_trigger_enable(DAC_INSTANCE, DAC_CHANNEL_BOTH);
     dac_set_trigger_source(DAC_INSTANCE, DAC_CR_TSEL1_T4 | DAC_CR_TSEL2_T4);
-    
+
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO4);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO5);
 }

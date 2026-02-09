@@ -1,8 +1,3 @@
-/**
- * @file dma_memcpy.h
- * Simple single-channel DMA memcpy for STM32G4
- */
-
 #ifndef DMA_MEMCPY_H
 #define DMA_MEMCPY_H
 

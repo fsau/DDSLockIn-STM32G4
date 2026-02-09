@@ -8,17 +8,17 @@ void adc_dac_timer_load(void)
 {
     rcc_periph_clock_enable(RCC_TIM4);  // Master timer: DAC
     rcc_periph_clock_enable(RCC_TIM3);  // Slave timer: ADC
-    
+
     uint32_t timer_clk = 170000000;     // APB2 timer clock (170 MHz)
     uint32_t adc_rate = 1000000;        // 2 MSa/s
     uint32_t prescaler = 0;             // no prescaler
     uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
-    
+
     timer_set_prescaler(TIM4, prescaler);
     timer_set_period(TIM4, arr);
     timer_set_master_mode(TIM4, TIM_CR2_MMS_UPDATE);
     timer_enable_preload(TIM4);
-    
+
     // gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO9);
     // gpio_set_output_options(GPIOB,
     //                         GPIO_OTYPE_PP,
@@ -73,7 +73,7 @@ void adc_dac_timer_stop(void)
 void adc_dac_timer_adjust(uint32_t rate, uint8_t prescaler)
 {
     uint32_t arr = (170000000UL / (rate * (prescaler + 1))) - 1;
- 
+
     cm_disable_interrupts();
     // Wait for timer to roll
     uint32_t t = TIM_CNT(TIM4);

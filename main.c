@@ -56,21 +56,21 @@ void jump_to_dfu(void) // not working very well...
 
     // Disable SysTick if used
     SCB_ICSR |= SCB_ICSR_PENDSTCLR;
-    
+
     // Set vector table to bootloader (system memory)
     SCB_VTOR = 0x1FFF0000;
-    
+
     // Get bootloader entry point
     uint32_t *bootloader_entry = (uint32_t *)(SCB_VTOR + 4);
     uint32_t jump_address = *bootloader_entry;
-    
+
     // Set stack pointer from bootloader's vector table
     __asm__ volatile ("msr msp, %0" : : "r" (*(volatile uint32_t *)SCB_VTOR));
-    
+
     // Jump to bootloader
     void (*bootloader)(void) = (void (*)(void))jump_address;
     bootloader();
-    
+
     // Never returns
     while(1);
 }
@@ -108,7 +108,7 @@ int main(void)
         CMD_FREQ,
         CMD_CAPT
     } cmd_state = CMD_IDLE;
-    
+
     uint32_t cmd_value = 0;
     uint8_t cmd_digits = 0;
 
@@ -161,7 +161,7 @@ int main(void)
                                 acc_ch0_sin += output.chA[1];
                                 acc_ch1_cos += output.chB[0];
                                 acc_ch1_sin += output.chB[1];
-                                acc_f += output.frequency.phase_inc>>32;
+                                acc_f += output.frequency.phase_inc>>30;
                                 n++;
                             }
                             if(n >= 50) {
@@ -169,28 +169,28 @@ int main(void)
                                 acc_ch0_sin /= n;
                                 acc_ch1_cos /= n;
                                 acc_ch1_sin /= n;
-                                acc_f /= n;
-    
+                                acc_f /= 4*n;
+
                                 uint8_t outbuf[128];
-    
-                                float f = (float)acc_f/(4294.96f);
-    
+
+                                double f = (double)acc_f/(4294.96f);
+
                                 /* Amplitudes */
                                 float amp0 = sqrtf(acc_ch0_cos*acc_ch0_cos + acc_ch0_sin*acc_ch0_sin);
                                 float amp1 = sqrtf(acc_ch1_cos*acc_ch1_cos + acc_ch1_sin*acc_ch1_sin);
-    
+
                                 /* Phases (radians) */
                                 float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
                                 float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
-    
+
                                 /* Relative quantities */
                                 float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
                                 float dphi = phi0 - phi1;
-    
+
                                 /* Wrap to [-pi, pi] */
                                 if (dphi >  M_PI) dphi -= 2.0f*M_PI;
                                 if (dphi < -M_PI) dphi += 2.0f*M_PI;
-    
+
                                 uint8_t s = snprintf(
                                     (char *)outbuf, sizeof(outbuf),
                                     "f %.3f Hz | CH0 %6.5f V %4.3f° | CH1 %6.5f V %4.3f° | "
@@ -200,9 +200,9 @@ int main(void)
                                     amp_ratio,
                                     dphi * (180.0f/M_PI)
                                 );
-                                    
+
                                 usbserial_send_tx(outbuf, s);
-    
+
                                 acc_ch0_cos = 0;
                                 acc_ch0_sin = 0;
                                 acc_ch1_cos = 0;
@@ -232,16 +232,16 @@ int main(void)
                         }
                         break;
                     case CMD_FREQ:
-                        dds_set_frequency((float)cmd_value/10.73741824f, 0.0f, 1000000);
-                        
+                        ddsli_set_frequency((float)cmd_value/10.73741824f, 0.0f, 1000000);
+
                         cmd_state = CMD_IDLE;
                         cmd_value = 0;
                         cmd_digits = 0;
                         break;
-                        
+
                     case CMD_CAPT:
                         auto_capture_dly = cmd_value;
-                        
+
                         cmd_state = CMD_IDLE;
                         cmd_value = 0;
                         cmd_digits = 0;

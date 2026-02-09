@@ -1,7 +1,3 @@
-/* Minimal DAC circular DMA output (TIM6 trigger)
- * This is a renamed copy of the previous dac_dma module.
- */
-
 #ifndef DAC_H
 #define DAC_H
 

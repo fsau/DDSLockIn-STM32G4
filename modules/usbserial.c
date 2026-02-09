@@ -227,37 +227,6 @@ void reset_clocks_to_default(void)
     gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO11 | GPIO12);
 }
 
-// static void jump_to_bootloader(void) // wip, not working
-// {
-//     volatile uint32_t *sysmem_vec = (uint32_t *)0x1FF00000UL;
-
-//     /* Deinit USB completely */
-//     nvic_disable_irq(NVIC_USB_HP_IRQ);
-//     nvic_disable_irq(NVIC_USB_LP_IRQ);
-//     nvic_disable_irq(NVIC_USB_WAKEUP_IRQ);
-
-//     RCC_APB1RSTR1 |= RCC_APB1RSTR1_USBRST;
-//     __asm__("nop");
-//     RCC_APB1RSTR1 &= ~RCC_APB1RSTR1_USBRST;
-
-//     gpio_mode_setup(GPIOA, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO11 | GPIO12);
-//     rcc_periph_clock_disable(RCC_CRS);
-// 	rcc_periph_clock_disable(RCC_GPIOA);
-//     rcc_periph_clock_disable(RCC_USB);
-
-//     reset_clocks_to_default();
-//     /* Disable all interrupts and jump */
-//     disable_irq();
-//     set_msp(sysmem_vec[0]);
-
-//     for(volatile int i=0;i<50000;i++);
-
-//     void (*bootloader_entry)(void) = (void (*)(void))sysmem_vec[1];
-//     bootloader_entry();
-
-//     while (1); // fallback, should never reach here
-// }
-
 volatile uint32_t rxi = 0, rxo = 0;
 volatile uint32_t txi = 0, txo = 0;
 
@@ -345,10 +314,10 @@ void usbserial_send_tx(uint8_t *data, uint32_t len)
 }
 
 /**
- * @brief Read data from the USB receive buffer
- * @param data Pointer to buffer where data will be copied
- * @param max_len Maximum number of bytes to read
- * @return Number of bytes actually read (0 if buffer empty)
+ * Read data from the USB receive buffer
+ * - data Pointer to buffer where data will be copied
+ * - max_len Maximum number of bytes to read
+ * Returns number of bytes actually read (0 if buffer empty)
  */
 uint32_t usbserial_read_rx(uint8_t* data, uint32_t max_len)
 {
@@ -381,8 +350,8 @@ uint32_t usbserial_read_rx(uint8_t* data, uint32_t max_len)
 }
 
 /**
- * @brief Check how many bytes are available in receive buffer
- * @return Number of bytes available for reading
+ * Check how many bytes are available in receive buffer
+ * Returns number of bytes available for reading
  */
 uint32_t usbserial_rx_available(void)
 {
@@ -400,10 +369,10 @@ uint32_t usbserial_rx_available(void)
 }
 
 /**
- * @brief Read a single byte from buffer (blocking with timeout)
- * @param data Pointer to store the byte
- * @param timeout_ms Maximum time to wait (0 = infinite)
- * @return 1 if byte read, 0 if timeout
+ * Read a single byte from buffer (blocking with timeout)
+ * - data Pointer to store the byte
+ * - timeout_ms Maximum time to wait (0 = infinite)
+ * Returns 1 if byte read, 0 if timeout
  */
 uint8_t usbserial_read_byte(uint8_t* data, uint32_t timeout_ms)
 {
@@ -433,12 +402,12 @@ uint8_t usbserial_read_byte(uint8_t* data, uint32_t timeout_ms)
 }
 
 /**
- * @brief Read until a specific character is found
- * @param buffer Destination buffer
- * @param max_len Maximum bytes to read
- * @param terminator Terminator character (e.g., '\n')
- * @param timeout_ms Maximum time to wait
- * @return Number of bytes read (including terminator if found)
+ * Read until a specific character is found
+ * - buffer Destination buffer
+ * - max_len Maximum bytes to read
+ * - terminator Terminator character (e.g., '\n')
+ * - timeout_ms Maximum time to wait
+ * Returns number of bytes read (including terminator if found)
  */
 uint32_t usbserial_read_until(uint8_t* buffer, uint32_t max_len, 
                               uint8_t terminator, uint32_t timeout_ms)
@@ -466,8 +435,8 @@ uint32_t usbserial_read_until(uint8_t* buffer, uint32_t max_len,
 }
 
 /**
- * @brief Peek at next byte without removing it from buffer
- * @return Next byte, or -1 if buffer empty
+ * Peek at next byte without removing it from buffer
+ * Returns next byte, or -1 if buffer empty
  */
 int16_t usbserial_peek(void)
 {
@@ -483,7 +452,7 @@ int16_t usbserial_peek(void)
 }
 
 /**
- * @brief Clear/Flush the receive buffer
+ * Clear/Flush the receive buffer
  */
 void usbserial_flush_rx(void)
 {
@@ -493,10 +462,10 @@ void usbserial_flush_rx(void)
 }
 
 // /**
-//  * @brief Advanced: Read with callback for processing
-//  * @param process_callback Function to process each byte
-//  * @param context User context pointer
-//  * @return Number of bytes processed
+//  * Advanced: Read with callback for processing
+//  * - process_callback Function to process each byte
+//  * - context User context pointer
+//  * Returns number of bytes processed
 //  */
 // uint32_t usbserial_process_rx(usbserial_process_cb_t process_callback, void* context)
 // {
@@ -578,7 +547,7 @@ void usb_lp_isr(void)
     usbd_poll(usbd_dev);
 }
 /**
- * @brief Disconnect and reset USB peripheral completely
+ * Disconnect and reset USB peripheral completely
  * 
  * This function safely disables USB, resets the peripheral,
  * and puts pins in a safe state. Call usbserial_init() to restart.
@@ -646,8 +615,8 @@ void usbserial_disconnect(void)
 }
 
 /**
- * @brief Check if USB is currently connected and functional
- * @return 1 if USB is initialized and connected, 0 otherwise
+ * Check if USB is currently connected and functional
+ * Returns 1 if USB is initialized and connected, 0 otherwise
  */
 uint8_t usbserial_is_connected(void)
 {
@@ -655,8 +624,8 @@ uint8_t usbserial_is_connected(void)
 }
 
 /**
- * @brief Get USB device status
- * @return Pointer to USB device if initialized, NULL otherwise
+ * Get USB device status
+ * Returns Pointer to USB device if initialized, NULL otherwise
  */
 usbd_device* usbserial_get_device(void)
 {

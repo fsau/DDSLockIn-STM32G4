@@ -25,29 +25,28 @@
  * -------------------------------------------------------------------------- */
 
 // int32 full-scale (2^31) corresponds to pi radians, range: [-pi, +pi)
-typedef int64_t  dds_phase_t; // Q32.32
-typedef int64_t  dds_phase_inc_t; // Q32.32 (fractional part = acc)
-typedef int64_t  dds_phase_inc_delta_t; // Q32.32
+typedef int64_t  ddsli_phase_t; // Q32.32
+typedef int64_t  ddsli_phase_inc_t; // Q32.32 (fractional part = acc)
+typedef int64_t  ddsli_phase_inc_delta_t; // Q32.32
 
 typedef struct {
-    dds_phase_t               phase;           // Current phase accumulator
-    dds_phase_inc_t           phase_inc;       // Phase increment per sample
-    dds_phase_inc_delta_t     phase_inc_delta; // Q32.32 frequency slope
-    // int64_t                   sample_rate;     // For frequency calculations
-} dds_phase_ctrl_t;
+    ddsli_phase_t           phase;           // Current phase accumulator
+    ddsli_phase_inc_t       phase_inc;       // Phase increment per sample
+    ddsli_phase_inc_delta_t phase_inc_delta; // Q32.32 frequency slope
+    // int64_t              sample_rate;     // For frequency calculations
+} ddsli_phase_ctrl_t;
 
 typedef struct {
     int16_t A1;           // Coefficient for sin (Q1.15)
-    int16_t B1;           // Coefficient for cos (Q1.15)
+    // int16_t B1;           // Coefficient for cos (Q1.15)
     int16_t A2;           // Coefficient for sin (Q1.15)
-    int16_t B2;           // Coefficient for cos (Q1.15)
-    int16_t output_scale; // Additional scaling
-} dds_out_ctrl_t;
+    // int16_t B2;           // Coefficient for cos (Q1.15)
+} ddsli_out_ctrl_t;
 
 /* Demodulated output sample. */
 typedef struct {
-    dds_phase_ctrl_t frequency;
-    dds_out_ctrl_t dds_amplitude;
+    ddsli_phase_ctrl_t frequency;
+    ddsli_out_ctrl_t ddsli_amplitude;
     float chA[3];
     float chB[3];
 } ddsli_output_t;
@@ -59,7 +58,7 @@ typedef struct {
 #define LPF_FIFO_LEN 64U
 
 // ADC/reference capture half-buffers
-#define CAPT_BUFF_HALVES 3
+#define CAPT_BUFF_HALVES 4
 
 /* --------------------------------------------------------------------------
  * Setup / Initialization
@@ -70,7 +69,8 @@ typedef struct {
  */
 void ddsli_setup(void);
 
-void dds_set_frequency(float f, float sweep, float sample_f);
+void ddsli_set_frequency(float f, float sweep, float sample_f);
+void ddsli_set_frequency_dual(float f, float fb, float sweep, float sweepb, float sample_f);
 
 /* --------------------------------------------------------------------------
  * Execution Control
@@ -99,7 +99,7 @@ bool ddsli_output_ready(void);
 bool ddsli_output_pop(ddsli_output_t *out);
 
 /* --------------------------------------------------------------------------
- * ADC/Reference Capture Interface 
+ * ADC/Reference Capture Interface
  * -------------------------------------------------------------------------- */
 
 /* Trigger a buffer capture for next n frames/half-buffers where
