@@ -34,6 +34,7 @@
 #include "ddsli.h"
 #include <stdint.h>
 #include <libopencm3/cm3/scb.h>
+#include <libopencm3/cm3/cortex.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/stm32/g4/nvic.h>
@@ -639,16 +640,11 @@ void ddsli_setup(void)
 
 bool ddsli_step_ready(void)
 {
-    // Check DAC flags
-    if (*dac_half_flag_ptr || *dac_full_flag_ptr)
+    // Check DAC&CORDIC flags
+    if (*dac_half_flag_ptr || *dac_full_flag_ptr || *cordic_done_flag_ptr)
     {
         return true;
     }
-
-    // // Check CORDIC completion
-    // if (cordic_running && *cordic_done_flag_ptr) {
-    //     return true;
-    // }
 
     return false;
 }
@@ -679,6 +675,8 @@ Note that adc/dac/phase buffers indexes are modulo 2, sincos is modulo 3
 
 bool ddsli_step(void)
 {
+    cm_disable_interrupts();
+    
     uint8_t sincos_thirds = ddsli_current_half % SINCOS_BUFF_HALVES;
     uint8_t buffers_half = ddsli_current_half % 2; // last complete half
 
@@ -687,6 +685,7 @@ bool ddsli_step(void)
         !(*dac_full_flag_ptr) &&
         !(*cordic_done_flag_ptr))
     {
+        cm_enable_interrupts();
         return 0;
     }
     else if (*cordic_done_flag_ptr)
@@ -699,21 +698,29 @@ bool ddsli_step(void)
             ddsli_current_half = (ddsli_current_half + 1) % (2 * SINCOS_BUFF_HALVES);
         }
 
+        cm_enable_interrupts();
         return 2;
     }
     else if (*dac_half_flag_ptr)
     {
         (*dac_half_flag_ptr)--;
         if (buffers_half == 1)
+        {            
+            cm_enable_interrupts();
             return 0; // skip if not the expected half
+        }
     }
     else if (*dac_full_flag_ptr)
     {
         (*dac_full_flag_ptr)--;
         if (buffers_half == 0)
+        {
+            cm_enable_interrupts();
             return 0;
+        }
     }
 
+    cm_enable_interrupts();
     ddsli_codic_halfbuffer(buffers_half, sincos_thirds);
     ddsli_generate_phase_halfbuffer_idx(!buffers_half);
     ddsli_mix_adc_halfbuffer(buffers_half, (sincos_thirds + 1) % SINCOS_BUFF_HALVES);
@@ -723,13 +730,20 @@ bool ddsli_step(void)
 
 bool ddsli_output_ready(void)
 {
-    return lpf_fifo_wr != lpf_fifo_rd;
+    cm_disable_interrupts();
+    bool ret = lpf_fifo_wr != lpf_fifo_rd;
+    cm_enable_interrupts();
+
+    return ret;
 }
 
 bool ddsli_output_pop(ddsli_output_t *out)
 {
+    cm_disable_interrupts();
+
     if (lpf_fifo_wr == lpf_fifo_rd)
     {
+        cm_enable_interrupts();
         return false; // FIFO empty
     }
 
@@ -737,7 +751,10 @@ bool ddsli_output_pop(ddsli_output_t *out)
     {
         *out = lpf_fifo[lpf_fifo_rd];
     }
+
     lpf_fifo_rd = (lpf_fifo_rd + 1) % LPF_FIFO_LEN;
+
+    cm_enable_interrupts();
     return true;
 }
 
