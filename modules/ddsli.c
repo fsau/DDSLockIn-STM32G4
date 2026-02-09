@@ -12,23 +12,27 @@
 /*
    TODO:
 
-   - Add demods with residuals/harmonics (1 or per basis?)
+   - Add demods with residuals/harmonics (1 or per basis?) and overload detection
    - Fix half-buffer flags & DMA interrupts: flags for every buffer piece
-       - Actually now in doubt if that will be useful, maybe only some
-         checks once in a while?
-         - Can check buffer ISR counters & DMA data remaining counter
+       - Actually not sure if that will be useful, maybe only some checks once
+         in a while?
+         - Check buffer ISR counters & DMA data remaining counter
          - What action to take if they're not in sync?
+            - Priority should be running the DDS/DAC continuously
+            - Needs function to reset ADC (including its DMA) and trigger/enable
+              it on the right moment
+              - Add "dirty ADC buffer" flag for ignoring bad samples
    - Single phase half-buffer: less memory, just trigger cordic afterwards?
-       - Cordic while mixing enough?
-       - Bad: cant CORDIC while calc. phases (but can while mixing)
-       - Good: could CORDIC two independent phases in one pass
-   - OPA preamp and OPA DAC2 output
-   - Calibration routines? Internal connect DAC-ADC?
+       - Cordic while demod is fast enough? So we don't have to wait CORDIC finish
+       - Bad: cant CORDIC while calculating next phases (but can do while demod)
+       - Good: can CORDIC two independent phases in a single run, if contiguous
+   - OPA preamp and OPA DAC2 output, allow independent channel selection/switching
+   - Calibration routines? Measuring Vref and internally connecting DAC-ADC?
    - Smooth/piecewise continuous amplitude control
-   - LSR with int32/64 instead of floats?
-   - Double independent DDS generation: done
-   - Toggle DDS/DAC/ADC/demux channels in software (currently hardcoded)
-   - Adjust buffer size in software
+   - LSR with int32/64 instead of floats? Not sure if better/faster
+   - Adjust DDS/DAC/ADC/demux instances on the fly (currently hardcoded)
+       - Set function pointer to each step and put #defines to global vars
+       - Put global vars in a instance struct?
 */
 
 #include "ddsli.h"
@@ -37,6 +41,7 @@
 #include <libopencm3/cm3/cortex.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/timer.h>
+#include <libopencm3/stm32/dma.h>
 #include <libopencm3/stm32/g4/nvic.h>
 #include "cordic.h"
 #include "adc.h"
@@ -86,8 +91,12 @@ typedef union
 #define SINCOS_BUFF_HALVES 3
 #define DDS_GEN_INSTANCES 2
 
-__attribute__((section(".ccm_data"))) volatile dual_adc_sample_t adc_captbuf[CAPT_BUFF_HALVES * HB_LEN];
-__attribute__((section(".ccm_data"))) volatile cordic_out_sample_t sincos_captbuf[CAPT_BUFF_HALVES * HB_LEN];
+__attribute__((section(".ccm_data")))
+volatile dual_adc_sample_t adc_captbuf[CAPT_BUFF_HALVES * HB_LEN];
+__attribute__((section(".ccm_data")))
+volatile cordic_out_sample_t sincos_captbuf[CAPT_BUFF_HALVES * HB_LEN];
+__attribute__((section(".ccm_data")))
+ddsli_phase_ctrl_t phase_captbuf[CAPT_BUFF_HALVES];
 
 volatile cordic_in_phase_t phase_buf[2 * HB_LEN * DDS_GEN_INSTANCES];
 volatile ddsli_phase_ctrl_t phase_buf_phase[2 * DDS_GEN_INSTANCES];
@@ -119,7 +128,6 @@ volatile int *dac_full_flag_ptr = NULL;
 volatile int *cordic_done_flag_ptr = NULL;
 volatile bool *cordic_busy_flag_ptr = NULL;
 uint32_t ddsli_current_half = 0; // 0 to 6
-bool stop_flag = 0;
 uint8_t capture_buffer = 0;
 
 // -----------------------------------------------------------------------------
@@ -208,7 +216,7 @@ void ddsli_set_frequency_dual(float f, float fb, float sweep, float sweepb, floa
     phase_dds.phase_inc = phase_inc * (1ULL << 32);
 
     volatile ddsli_phase_inc_t phase_incb = (ddsli_phase_inc_t)((fb * (1ULL << 32)) / sample_f);
-    phase_ddsB.phase_inc = phase_inc * (1ULL << 32);
+    phase_ddsB.phase_inc = phase_incb * (1ULL << 32);
 
     if (sweep != 0.0f)
     {
@@ -333,8 +341,8 @@ static inline void ddsli_process_dac_halfbuffer(uint32_t dac_half_idx,
 // -----------------------------------------------------------------------------
 
 // Mix/multiplier + block integrator and pass to FIFO.
-// Needs better windowing ans real low pass filtering.
-// But hey it works.
+// Needs better windowing and real low pass filtering.
+// But hey it works and is faster than least squares.
 static inline ddsli_output_t ddsli_mix_adc_sincos(
     volatile dual_adc_sample_t *adc_src,
     volatile cordic_out_sample_t *sincos_src,
@@ -369,25 +377,6 @@ static inline ddsli_output_t ddsli_mix_adc_sincos(
     ret.chB[2] = 0;
 
     return ret;
-}
-
-// Only copy buffer to capture, don't demux (mostly for debugging)
-// TODO: Do it with DMA, CCR can be addressed using offset
-static inline void ddsli_capt_adc_sincos(
-    volatile dual_adc_sample_t *adc_src,
-    volatile cordic_out_sample_t *sincos_src,
-    uint32_t len)
-{
-    static uint8_t half = 0;
-    half = (half + 1) % CAPT_BUFF_HALVES;
-    dual_adc_sample_t *dbadc = (dual_adc_sample_t *)&adc_captbuf[half * HB_LEN];
-    cordic_out_sample_t *dbsin = (cordic_out_sample_t *)&sincos_captbuf[half * HB_LEN];
-
-    for (uint32_t i = 0; i < len; i++)
-    {
-        dbadc[i].raw = adc_src[i].raw;
-        dbsin[i].raw = sincos_src[i].raw;
-    }
 }
 
 // Least squares regression with 2 components + DC using floats.
@@ -487,11 +476,13 @@ static inline ddsli_output_t ddsli_lsr_adc_sincos(
     return ret;
 }
 
-// Convenience wrapper for half-buffer mixing
+// Convenience wrapper for half-buffer mixing and capture
 static inline void ddsli_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sincos_offset)
 {
+    cm_disable_interrupts();
     volatile dual_adc_sample_t *adc_src = &adc_buf[((adc_half_idx) % 2) * HB_LEN];
     volatile cordic_out_sample_t *sincos_src = &sincos_buf[((sincos_offset) % SINCOS_BUFF_HALVES) * HB_LEN];
+    ddsli_phase_ctrl_t curr_phase = sincos_buf_phase[sincos_offset % SINCOS_BUFF_HALVES];
     ddsli_output_t out;
 
     if (capture_buffer)
@@ -501,16 +492,22 @@ static inline void ddsli_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sinc
 
         uint32_t ofs = (CAPT_BUFF_HALVES - capture_buffer) * HB_LEN;
 
+        cm_enable_interrupts();
         dma_memcpy32((uint32_t *)&adc_captbuf[ofs], (uint32_t *)adc_src, HB_LEN);
         dma_memcpy32((uint32_t *)&sincos_captbuf[ofs], (uint32_t *)sincos_src, HB_LEN);
+        cm_disable_interrupts();
+        phase_captbuf[CAPT_BUFF_HALVES - capture_buffer] = curr_phase;
+
         capture_buffer--;
     }
+    cm_enable_interrupts();
 
     out = ddsli_lsr_adc_sincos(adc_src, sincos_src, HB_LEN);
 
+    cm_disable_interrupts();
     uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
 
-    lpf_fifo[lpf_fifo_wr].frequency = sincos_buf_phase[sincos_offset % SINCOS_BUFF_HALVES];
+    lpf_fifo[lpf_fifo_wr].frequency = curr_phase;
 
     lpf_fifo[lpf_fifo_wr].chA[0] = out.chA[0];
     lpf_fifo[lpf_fifo_wr].chA[1] = out.chA[1];
@@ -521,6 +518,7 @@ static inline void ddsli_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sinc
     lpf_fifo[lpf_fifo_wr].chB[2] = out.chB[2];
 
     lpf_fifo_wr = next_wr;
+    cm_enable_interrupts();
 }
 
 // -----------------------------------------------------------------------------
@@ -533,37 +531,47 @@ uint16_t cordic_next_size = 0;
 
 static inline void ddsli_codic_halfbuffer(uint32_t buffer_half_idx, uint32_t sincos_offset)
 {
+    cm_disable_interrupts();
     volatile cordic_in_phase_t *src = &phase_buf[((buffer_half_idx) % 2) * HB_LEN];
     volatile cordic_out_sample_t *dst = &sincos_buf[((sincos_offset) % SINCOS_BUFF_HALVES) * HB_LEN];
 
     sincos_buf_phase[sincos_offset % SINCOS_BUFF_HALVES] = phase_buf_phase[buffer_half_idx % 2];
     sincos_buf_phase[(sincos_offset % SINCOS_BUFF_HALVES) + SINCOS_BUFF_HALVES] = phase_buf_phase[(buffer_half_idx % 2) + 2];
 
+    cm_enable_interrupts();
     cordic_start_dma((volatile uint32_t *)src,
                      (volatile uint32_t *)dst,
                      HB_LEN);
+    cm_disable_interrupts();
 
     cordic_next_src = &src[2 * HB_LEN];
     cordic_next_dst = &dst[3 * HB_LEN];
     cordic_next_size = HB_LEN;
+
+    cm_enable_interrupts();
 }
 
-static inline bool ddsli_codic_pending()
+static inline bool ddsli_codic_pending(void)
 {
+    cm_disable_interrupts();
     if ((cordic_next_src != NULL) && (cordic_next_dst != NULL) && cordic_next_size)
     {
+        cm_enable_interrupts();
         cordic_start_dma((volatile uint32_t *)cordic_next_src,
                          (volatile uint32_t *)cordic_next_dst,
                          cordic_next_size);
+        cm_disable_interrupts();
 
         cordic_next_src = NULL;
         cordic_next_dst = NULL;
         cordic_next_size = 0;
-        return 0;
+        cm_enable_interrupts();
+        return 1;
     }
     else
     {
-        return 1;
+        cm_enable_interrupts();
+        return 0;
     }
 }
 
@@ -573,9 +581,11 @@ static inline bool ddsli_codic_pending()
 
 void ddsli_setup(void)
 {
-    // Assumes ADC and DAC are triggered by same source (a timer, for
-    // example) that is currently disabled, otherwise buffers will
-    // be unsynchronized. After setup you can turn them on as needed.
+    // Assumes ADC and DAC are triggered alternately (with a timer, for
+    // example) but is currently disabled, otherwise buffers will
+    // be unsynchronized. After setup you can turn them on.
+    // Note that they have to be initialized/powered (rcc clocks etc), but
+    // with counter or trigger/compare outputs disabled.
 
     // Initialize peripherals.
     dac_init();
@@ -631,7 +641,7 @@ void ddsli_setup(void)
     }
 
     dac_start((volatile uint32_t *)dac_buf, 2 * HB_LEN);
-    // ADC and DAC triggers can be enabled now
+    // ADC and DAC trigger sources can be enabled now
 }
 
 // -----------------------------------------------------------------------------
@@ -650,33 +660,32 @@ bool ddsli_step_ready(void)
 }
 
 /*
-Initilization steps: (sincos -> DAC is omitted for simplicity)
+Initilization steps:
 Note that adc/dac/phase buffers indexes are modulo 2, sincos is modulo 3
 
  1. Load phase 0 and 1
  2. Run CORDIC on phase 0 and 1 -> sincos 0 and 1 -> dac 0 and 1
  3. Load phase 2
- 4. Set halfs = 1
- 5. Start DAC/ADC
+ 4. Start DAC/ADC
 - Wait DAC half buffer: dac/adc 0 done. halfs = 2
- 6. Run CORDIC on phase 2 -> sincos 2 -> dac 2
- 7. Run demod on adc 0/sincos 0
- 8. Load phase 3
+ 5. Run CORDIC on phase 2 -> sincos 2 -> dac 2
+ 6. Run demod on adc 0/sincos 0
+ 7. Load phase 3
 - Wait DAC full buffer: dac/adc 3 done. halfs = 3
- 9. Run CORDIC on phase 3 -> sincos 3 -> dac 3
- 10. Run demod for adc 1/sincos 1
- 11. Load phase 4
+ 8. Run CORDIC on phase 3 -> sincos 3 -> dac 3
+ 9. Run demod for adc 1/sincos 1
+ 10. Load phase 4
 - Wait DAC half buffer: dac/adc 0 done. halfs = 4
- 12. Run CORDIC on phase 4 -> sincos 4 -> dac 4
- 13. Run demod for adc 2/sincos 2
- 14. Load phase 5
+ 11. Run CORDIC on phase 4 -> sincos 4 -> dac 4
+ 12. Run demod for adc 2/sincos 2
+ 13. Load phase 5
 - Repeat...
 */
 
-bool ddsli_step(void)
+int8_t ddsli_step(void)
 {
     cm_disable_interrupts();
-    
+
     uint8_t sincos_thirds = ddsli_current_half % SINCOS_BUFF_HALVES;
     uint8_t buffers_half = ddsli_current_half % 2; // last complete half
 
@@ -692,9 +701,11 @@ bool ddsli_step(void)
     {
         (*cordic_done_flag_ptr)--;
 
-        if (ddsli_codic_pending())
+        if (!ddsli_codic_pending())
         {
+            cm_enable_interrupts();
             ddsli_process_dac_halfbuffer(buffers_half, sincos_thirds);
+            cm_disable_interrupts();
             ddsli_current_half = (ddsli_current_half + 1) % (2 * SINCOS_BUFF_HALVES);
         }
 
@@ -707,7 +718,7 @@ bool ddsli_step(void)
         if (buffers_half == 1)
         {            
             cm_enable_interrupts();
-            return 0; // skip if not the expected half
+            return -1; // skip if not the expected half
         }
     }
     else if (*dac_full_flag_ptr)
@@ -716,13 +727,37 @@ bool ddsli_step(void)
         if (buffers_half == 0)
         {
             cm_enable_interrupts();
-            return 0;
+            return -1;
         }
     }
 
     cm_enable_interrupts();
+
     ddsli_codic_halfbuffer(buffers_half, sincos_thirds);
     ddsli_generate_phase_halfbuffer_idx(!buffers_half);
+
+    cm_disable_interrupts();
+
+    if (*cordic_done_flag_ptr)
+    {
+        (*cordic_done_flag_ptr)--;
+
+        cm_enable_interrupts();
+        if (!ddsli_codic_pending())
+        {
+            // This should not happen, but if it does...
+            ddsli_mix_adc_halfbuffer(buffers_half, (sincos_thirds + 1) % SINCOS_BUFF_HALVES);
+            ddsli_process_dac_halfbuffer(buffers_half, sincos_thirds);
+
+            cm_disable_interrupts();
+            ddsli_current_half = (ddsli_current_half + 1) % (2 * SINCOS_BUFF_HALVES);
+            cm_enable_interrupts();
+            return 2;
+        }
+    }
+
+    cm_enable_interrupts();
+
     ddsli_mix_adc_halfbuffer(buffers_half, (sincos_thirds + 1) % SINCOS_BUFF_HALVES);
 
     return 1;
@@ -763,44 +798,56 @@ bool ddsli_output_pop(ddsli_output_t *out)
  */
 void ddsli_capture_buffers(uint8_t n)
 {
+    cm_disable_interrupts();
+    if(capture_buffer) return;
     if (n > CAPT_BUFF_HALVES)
     {
         n = CAPT_BUFF_HALVES;
     }
     capture_buffer = n;
+    cm_enable_interrupts();
 }
 
 /* Returns true if capture buffers are ready for reading */
 bool ddsli_capture_ready(void)
 {
-    return (capture_buffer == 0);
+    cm_disable_interrupts();
+    bool ret = (capture_buffer == 0);
+    cm_enable_interrupts();
+    return ret;
 }
 
 /* Reads captured buffers */
-bool ddsli_capture_read(uint32_t *adc, uint32_t *ref)
+bool ddsli_capture_read(uint32_t *adc, uint32_t *ref, uint32_t len, uint32_t ofs)
 {
+    const uint32_t cap_len = CAPT_BUFF_HALVES * HB_LEN;
+
+    cm_disable_interrupts();
     if (capture_buffer != 0)
     {
-        return false; // Capture not complete
+        cm_enable_interrupts();
+        return false; /* Capture not complete */
     }
 
-    if (adc)
+    if (ofs >= cap_len)
     {
-        // Copy ADC capture buffer (interleaved 16-bit samples packed in 32-bit words)
-        for (uint32_t i = 0; i < CAPT_BUFF_HALVES * HB_LEN; i++)
-        {
-            adc[i] = adc_captbuf[i].raw;
-        }
+        cm_enable_interrupts();
+        return false; /* Invalid offset */
     }
 
-    if (ref)
-    {
-        // Copy reference (sincos) capture buffer
-        for (uint32_t i = 0; i < CAPT_BUFF_HALVES * HB_LEN; i++)
-        {
-            ref[i] = sincos_captbuf[i].raw;
-        }
+    if ((ofs + len) > cap_len)
+        len = cap_len - ofs;
+
+    if (adc) {
+        for (uint32_t i = 0; i < len; i++)
+            adc[i] = adc_captbuf[ofs + i].raw;
     }
+
+    if (ref) {
+        for (uint32_t i = 0; i < len; i++)
+            ref[i] = sincos_captbuf[ofs + i].raw;
+    }
+    cm_enable_interrupts();
 
     return true;
 }

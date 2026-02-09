@@ -1,6 +1,5 @@
-#include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+// #include <string.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/crs.h>
@@ -8,6 +7,7 @@
 #include <libopencm3/usb/cdc.h>
 #include <libopencm3/cm3/nvic.h>
 #include "usbserial.h"
+#include "utils.h"
 
 usbd_device *usbd_dev;
 
@@ -643,11 +643,11 @@ void usbserial_disconnect(void)
     }
 
     // 10. Clear USB control buffer
-    memset(usbd_control_buffer, 0, sizeof(usbd_control_buffer));
+    amemset(usbd_control_buffer, 0, sizeof(usbd_control_buffer));
 
     // 11. Reset USB buffer indices in software
-    memset(rxbuff, 0, USB_BUFF_SIZE);
-    memset(txbuff, 0, USB_BUFF_SIZE);
+    amemset(rxbuff, 0, USB_BUFF_SIZE);
+    amemset(txbuff, 0, USB_BUFF_SIZE);
 }
 
 /**

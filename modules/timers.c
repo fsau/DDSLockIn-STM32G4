@@ -60,9 +60,9 @@ void adc_dac_timer_start(void)
 void adc_dac_timer_stop(void)
 {
     cm_disable_interrupts();
-    // Wait for timer to roll
+    
     uint32_t t = TIM_CNT(TIM4);
-    while (TIM_CNT(TIM4) >= t)
+    while (TIM_CNT(TIM4) >= t) // Wait for timer to roll
         t = TIM_CNT(TIM4);
     timer_disable_counter(TIM3);
     timer_disable_counter(TIM4);
@@ -76,9 +76,9 @@ void adc_dac_timer_adjust(uint32_t rate, uint8_t prescaler)
     uint32_t arr = (170000000UL / (rate * (prescaler + 1))) - 1;
 
     cm_disable_interrupts();
-    // Wait for timer to roll
+    
     uint32_t t = TIM_CNT(TIM4);
-    while (TIM_CNT(TIM4) >= t)
+    while (TIM_CNT(TIM4) >= t) // Wait for timer to roll
         t = TIM_CNT(TIM4);
     timer_set_prescaler(TIM4, prescaler);
     timer_set_period(TIM4, arr);

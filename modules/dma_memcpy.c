@@ -3,7 +3,6 @@
 #include <libopencm3/stm32/dmamux.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/cm3/nvic.h>
-#include <string.h>
 #include "utils.h"
 
 #define DMA_MEMCPY_DMA DMA1

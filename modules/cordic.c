@@ -1,7 +1,7 @@
 #include "cordic.h"
 #include "utils.h"
 #include <stdlib.h>
-#include <string.h>
+// #include <string.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/cordic.h>
 #include <libopencm3/stm32/dma.h>

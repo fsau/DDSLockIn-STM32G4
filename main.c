@@ -1,4 +1,3 @@
-// #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <libopencm3/stm32/rcc.h>
@@ -48,11 +47,11 @@ void delay_ms(uint32_t ms)
         __asm__("nop");
 }
 
+// Fixed breakpoint for debug
 void bp_here(void)
 {
     __asm__ volatile("bkpt #0");
-    ;
-} // fixed breakpoint for dbg
+} 
 
 void jump_to_dfu(void) // not working very well...
 {
@@ -83,7 +82,7 @@ void jump_to_dfu(void) // not working very well...
 
 int main(void)
 {
-    SCB_VTOR = 0x08000000; // reset after DFU, still missing something
+    SCB_VTOR = 0x08000000; // fix for reset after DFU, still missing something
 
     struct rcc_clock_scale pllconfig = rcc_hse_8mhz_3v3[RCC_CLOCK_3V3_170MHZ];
     rcc_clock_setup_pll(&pllconfig);
@@ -126,7 +125,7 @@ int main(void)
 
     while (1)
     {
-        uint8_t buf[64];
+        uint8_t buf[64] = {0};
         static float acc_ch0_cos = 0;
         static float acc_ch0_sin = 0;
         static float acc_ch1_cos = 0;
@@ -193,7 +192,7 @@ int main(void)
 
                         uint8_t outbuf[128];
 
-                        double f = (double)acc_f / (4294.96f);
+                        float f = (float)acc_f / (4294.96f);
 
                         /* Amplitudes */
                         float amp0 = sqrtf(acc_ch0_cos * acc_ch0_cos + acc_ch0_sin * acc_ch0_sin);
@@ -297,11 +296,11 @@ int main(void)
                     }
                     else if (buf[i] == 'S' || buf[i] == 's')
                     {
-                        adc_dac_timer_stop();
+                        // adc_dac_timer_stop();
                     }
                     else if (buf[i] == 'R' || buf[i] == 'r')
                     {
-                        adc_dac_timer_start();
+                        // adc_dac_timer_start();
                     }
                     else
                     {

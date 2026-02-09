@@ -1,7 +1,37 @@
 #include "utils.h"
-#include <string.h>
 #include <libopencm3/cm3/nvic.h>
+#include <libopencm3/cm3/cortex.h>
 #include <libopencm3/stm32/dma.h>
+
+void *amemset(void *dst, int c, size_t n)
+{
+    uint8_t *d = (uint8_t *)dst;
+    uint8_t v = (uint8_t)c;
+
+    if((n <= 0)||(n > 0x10000)) return dst;
+
+    // cm_disable_interrupts();
+    while (n--)
+        *d++ = v;
+    // cm_enable_interrupts();
+
+    return dst;
+}
+
+void *amemcpy(void *dst, const void *src, size_t n)
+{
+    uint8_t *d = (uint8_t *)dst;
+    const uint8_t *s = (const uint8_t *)src;
+
+    if((n <= 0)||(n > 0x10000)) return dst;
+
+    // cm_disable_interrupts();
+    while (n--)
+        *d++ = *s++;
+    // cm_enable_interrupts();
+
+    return dst;
+}
 
 // Helper function to enable and set priority for DMA channel
 void dma_channel_enable_irq_with_priority(uint32_t dma_channel, uint8_t priority)
@@ -94,6 +124,6 @@ char *fmt_f(char *p, float x, int width, int decimals)
         width--;
     }
 
-    memcpy(p, tmp, len);
+    amemcpy(p, tmp, len);
     return p + len;
 }

@@ -22,3 +22,6 @@ void dma_channel_enable_irq_with_priority(uint32_t dma_channel, uint8_t priority
 
 // Helper function for printing floats without snprintf
 char *fmt_f(char *p, float x, int width, int decimals);
+
+void *amemset(void *dst, int c, size_t n);
+void *amemcpy(void *dst, const void *src, size_t n);
