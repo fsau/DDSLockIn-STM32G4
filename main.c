@@ -326,22 +326,17 @@ int main(void)
             }
         }
 
-        if (auto_capture_dly)
-        {
-            static uint32_t acd_cnt = 0;
-            if ((clock_ticks / auto_capture_dly) != acd_cnt)
-            {
-                acd_cnt = clock_ticks / auto_capture_dly;
-                ddsli_capture_buffers(4);
-                while (!ddsli_capture_ready())
-                    __asm__("nop");
-                usbserial_send_tx((uint8_t *)ddsli_get_capt_adc(), 4 * 4 * HB_LEN);
-            }
-        }
-
-        if ((clock_ticks / 2) != lasttick)
-        {
-            lasttick = clock_ticks / 2;
-        }
+        // if (auto_capture_dly)
+        // {
+        //     static uint32_t acd_cnt = 0;
+        //     if ((clock_ticks / auto_capture_dly) != acd_cnt)
+        //     {
+        //         acd_cnt = clock_ticks / auto_capture_dly;
+        //         ddsli_capture_buffers(4);
+        //         while (!ddsli_capture_ready())
+        //             __asm__("nop");
+        //         usbserial_send_tx((uint8_t *)ddsli_get_capt_adc(), 4 * 4 * HB_LEN);
+        //     }
+        // }
     }
 }

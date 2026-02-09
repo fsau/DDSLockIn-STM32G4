@@ -91,16 +91,16 @@ class SerialSweep:
         
         for measurement_idx in range(average_count):
             # Send frequency
-            cmd = f"ff{fw}aa{amplitude:03d}xx".encode()
+            cmd = f"ff{fw}###".encode()
             self.ser.write(cmd)
             time.sleep(0.001)
             
-            self.ser.reset_output_buffer()
-
             # Apply sample delay
             if sample_delay_ms > 0:
                 time.sleep(sample_delay_ms / 1000.0)
 
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
             # Trigger measurement
             self.ser.write(b"m")
             raw = self.ser.read(1024 * 4)
