@@ -7,9 +7,10 @@
 void dma_channel_enable_irq_with_priority(uint32_t dma_channel, uint8_t priority)
 {
     uint32_t irq;
-    
+
     // Map DMA channel to IRQ number
-    switch (dma_channel) {
+    switch (dma_channel)
+    {
     case DMA_CHANNEL1:
         irq = NVIC_DMA1_CHANNEL1_IRQ;
         break;
@@ -34,7 +35,7 @@ void dma_channel_enable_irq_with_priority(uint32_t dma_channel, uint8_t priority
     default:
         return; // Invalid channel
     }
-    
+
     // Set priority and enable
     nvic_set_priority(irq, priority);
     nvic_enable_irq(irq);
@@ -53,7 +54,8 @@ char *fmt_f(char *p, float x, int width, int decimals)
     char tmp[24];
     char *t = tmp;
 
-    if (v < 0) {
+    if (v < 0)
+    {
         *t++ = '-';
         v = -v;
     }
@@ -64,7 +66,8 @@ char *fmt_f(char *p, float x, int width, int decimals)
     /* integer part */
     char ibuf[12];
     int n = 0;
-    do {
+    do
+    {
         ibuf[n++] = '0' + (ip % 10);
         ip /= 10;
     } while (ip);
@@ -72,9 +75,11 @@ char *fmt_f(char *p, float x, int width, int decimals)
     while (n--)
         *t++ = ibuf[n];
 
-    if (decimals) {
+    if (decimals)
+    {
         *t++ = '.';
-        for (int32_t d = scale / 10; d; d /= 10) {
+        for (int32_t d = scale / 10; d; d /= 10)
+        {
             *t++ = '0' + (fp / d);
             fp %= d;
         }
@@ -83,7 +88,8 @@ char *fmt_f(char *p, float x, int width, int decimals)
     int len = t - tmp;
 
     /* right-align (space padded) */
-    while (len < width) {
+    while (len < width)
+    {
         *p++ = ' ';
         width--;
     }

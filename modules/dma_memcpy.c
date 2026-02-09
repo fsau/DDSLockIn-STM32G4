@@ -6,18 +6,19 @@
 #include <string.h>
 #include "utils.h"
 
-#define DMA_MEMCPY_DMA       DMA1
-#define DMA_MEMCPY_CHANNEL   DMA_CHANNEL5
-#define DMA_MEMCPY_IRQ       NVIC_DMA1_CHANNEL5_IRQ
-#define DMAMUX_CHANNEL       5
+#define DMA_MEMCPY_DMA DMA1
+#define DMA_MEMCPY_CHANNEL DMA_CHANNEL5
+#define DMA_MEMCPY_IRQ NVIC_DMA1_CHANNEL5_IRQ
+#define DMAMUX_CHANNEL 5
 
-#define DMA_MEMCPY_FIFO_DEPTH  8
+#define DMA_MEMCPY_FIFO_DEPTH 8
 
 #define DMA_MEMCPY_ID(slot, seq) (((uint32_t)(seq) << 16) | ((uint32_t)(slot) & 0xFFFF))
-#define DMA_MEMCPY_ID_SLOT(id)   ((uint16_t)((id) & 0xFFFF))
-#define DMA_MEMCPY_ID_SEQ(id)    ((uint16_t)((id) >> 16))
+#define DMA_MEMCPY_ID_SLOT(id) ((uint16_t)((id) & 0xFFFF))
+#define DMA_MEMCPY_ID_SEQ(id) ((uint16_t)((id) >> 16))
 
-typedef struct {
+typedef struct
+{
     volatile uint32_t *dest;
     volatile uint32_t *src;
     uint32_t words;
@@ -47,7 +48,7 @@ bool dma_memcpy_init(void)
 
     // Clear any pending interrupts
     dma_clear_interrupt_flags(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL,
-        DMA_TCIF | DMA_HTIF | DMA_TEIF | DMA_GIF);
+                              DMA_TCIF | DMA_HTIF | DMA_TEIF | DMA_GIF);
 
     // Configure DMAMUX: request ID 0 = memory-to-memory (software trigger)
     dmamux_set_dma_channel_request(DMAMUX1, DMAMUX_CHANNEL, 0);
@@ -74,7 +75,8 @@ bool dma_memcpy_init(void)
 
 static void dma_memcpy_start_next(void)
 {
-    if (dma_fifo_count == 0) {
+    if (dma_fifo_count == 0)
+    {
         dma_busy = false;
         return;
     }
@@ -82,14 +84,14 @@ static void dma_memcpy_start_next(void)
     dma_memcpy_req_t *r = &dma_fifo[dma_fifo_tail];
 
     dma_disable_channel(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL);
-    
+
     dma_set_peripheral_address(DMA1, DMA_CHANNEL5, (uint32_t)DMA_ADDR(r->dest));
     dma_set_memory_address(DMA1, DMA_CHANNEL5, (uint32_t)DMA_ADDR(r->src));
     dma_set_number_of_data(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL,
                            r->words);
 
     dma_clear_interrupt_flags(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL,
-        DMA_TCIF | DMA_HTIF | DMA_TEIF | DMA_GIF);
+                              DMA_TCIF | DMA_HTIF | DMA_TEIF | DMA_GIF);
 
     dma_busy = true;
     dma_enable_channel(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL);
@@ -115,11 +117,11 @@ uint32_t dma_memcpy32(volatile uint32_t *dest,
     uint8_t slot = dma_fifo_head;
     dma_memcpy_req_t *r = &dma_fifo[slot];
 
-    r->dest  = dest;
-    r->src   = src;
+    r->dest = dest;
+    r->src = src;
     r->words = size;
-    r->seq   = dma_seq++;
-    r->done  = false;
+    r->seq = dma_seq++;
+    r->done = false;
 
     if (dma_seq == 0)
         dma_seq = 1;
@@ -139,7 +141,7 @@ bool dma_memcpy_is_complete(uint32_t id)
         return false;
 
     uint16_t slot = DMA_MEMCPY_ID_SLOT(id);
-    uint16_t seq  = DMA_MEMCPY_ID_SEQ(id);
+    uint16_t seq = DMA_MEMCPY_ID_SEQ(id);
 
     if (slot >= DMA_MEMCPY_FIFO_DEPTH)
         return false;
@@ -155,7 +157,8 @@ bool dma_memcpy_is_complete(uint32_t id)
 
 void dma1_channel5_isr(void)
 {
-    if (dma_get_interrupt_flag(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL, DMA_TCIF)) {
+    if (dma_get_interrupt_flag(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL, DMA_TCIF))
+    {
         dma_clear_interrupt_flags(DMA_MEMCPY_DMA, DMA_MEMCPY_CHANNEL, DMA_TCIF);
 
         dma_memcpy_req_t *r = &dma_fifo[dma_fifo_tail];

@@ -12,9 +12,9 @@
 #include <libopencm3/cm3/scb.h>
 
 #define CORDIC_DMA_WRITE_CHANNEL DMA_CHANNEL3
-#define CORDIC_DMA_READ_CHANNEL  DMA_CHANNEL4
-#define CORDIC_DMAMUX_WRITE_CH   DMA_CHANNEL3
-#define CORDIC_DMAMUX_READ_CH    DMA_CHANNEL4
+#define CORDIC_DMA_READ_CHANNEL DMA_CHANNEL4
+#define CORDIC_DMAMUX_WRITE_CH DMA_CHANNEL3
+#define CORDIC_DMAMUX_READ_CH DMA_CHANNEL4
 
 volatile bool cordic_transfer_in_progress = 0;
 volatile int cordic_transfer_done = 0;
@@ -97,7 +97,8 @@ int cordic_start_dma(volatile uint32_t *write_buf32, volatile uint32_t *read_buf
 
 int cordic_transfer_complete(void)
 {
-    if (cordic_transfer_done) {
+    if (cordic_transfer_done)
+    {
         cordic_transfer_done = 0; /* clear on read */
         return 1;
     }
@@ -140,11 +141,12 @@ void dma1_channel6_isr(void)
 void dma1_channel7_isr(void)
 #else
 /* no handler */
-void dma1_channel1_isr(void) { }
+void dma1_channel1_isr(void) {}
 #endif
 {
     /* check transfer complete flag */
-    if (dma_get_interrupt_flag(DMA1, CORDIC_DMA_READ_CHANNEL, DMA_GIF)) {
+    if (dma_get_interrupt_flag(DMA1, CORDIC_DMA_READ_CHANNEL, DMA_GIF))
+    {
         /* clear TC flags */
         dma_clear_interrupt_flags(DMA1, CORDIC_DMA_READ_CHANNEL, DMA_GIF);
 
@@ -157,7 +159,8 @@ void dma1_channel1_isr(void) { }
         cordic_disable_dma_write();
 
         /* Flush CORDIC result-ready flag by reading any remaining RDATA. */
-        while (cordic_is_result_ready()) {
+        while (cordic_is_result_ready())
+        {
             (void)cordic_read_32bit_result();
         }
 

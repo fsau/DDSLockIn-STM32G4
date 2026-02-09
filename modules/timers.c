@@ -6,12 +6,12 @@
 
 void adc_dac_timer_init(void)
 {
-    rcc_periph_clock_enable(RCC_TIM4);  // Master timer: DAC
-    rcc_periph_clock_enable(RCC_TIM3);  // Slave timer: ADC
+    rcc_periph_clock_enable(RCC_TIM4); // Master timer: DAC
+    rcc_periph_clock_enable(RCC_TIM3); // Slave timer: ADC
 
-    uint32_t timer_clk = 170000000;     // APB2 timer clock (170 MHz)
-    uint32_t adc_rate = 1000000;        // 2 MSa/s
-    uint32_t prescaler = 0;             // no prescaler
+    uint32_t timer_clk = 170000000; // APB2 timer clock (170 MHz)
+    uint32_t adc_rate = 1000000;    // 2 MSa/s
+    uint32_t prescaler = 0;         // no prescaler
     uint32_t arr = (timer_clk / (adc_rate * (prescaler + 1))) - 1;
 
     timer_set_prescaler(TIM4, prescaler);
@@ -33,8 +33,8 @@ void adc_dac_timer_init(void)
     timer_set_prescaler(TIM3, prescaler);
     timer_set_period(TIM3, arr);
     timer_set_master_mode(TIM3, TIM_CR2_MMS_UPDATE);
-    timer_slave_set_mode(TIM3,TIM_SMCR_SMS_TM); // Starts after TIM4 update
-    timer_slave_set_trigger(TIM3,TIM_SMCR_TS_ITR3);
+    timer_slave_set_mode(TIM3, TIM_SMCR_SMS_TM); // Starts after TIM4 update
+    timer_slave_set_trigger(TIM3, TIM_SMCR_TS_ITR3);
     timer_enable_preload(TIM3);
 
     // gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO0);
@@ -62,7 +62,8 @@ void adc_dac_timer_stop(void)
     cm_disable_interrupts();
     // Wait for timer to roll
     uint32_t t = TIM_CNT(TIM4);
-    while(TIM_CNT(TIM4) >= t) t = TIM_CNT(TIM4);
+    while (TIM_CNT(TIM4) >= t)
+        t = TIM_CNT(TIM4);
     timer_disable_counter(TIM3);
     timer_disable_counter(TIM4);
     TIM_CNT(TIM3) = 0;
@@ -77,10 +78,11 @@ void adc_dac_timer_adjust(uint32_t rate, uint8_t prescaler)
     cm_disable_interrupts();
     // Wait for timer to roll
     uint32_t t = TIM_CNT(TIM4);
-    while(TIM_CNT(TIM4) >= t) t = TIM_CNT(TIM4);
-    timer_set_prescaler(TIM4,prescaler);
+    while (TIM_CNT(TIM4) >= t)
+        t = TIM_CNT(TIM4);
+    timer_set_prescaler(TIM4, prescaler);
     timer_set_period(TIM4, arr);
-    timer_set_prescaler(TIM3,prescaler);
+    timer_set_prescaler(TIM3, prescaler);
     timer_set_period(TIM3, arr);
     cm_enable_interrupts();
 }

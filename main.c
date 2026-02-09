@@ -48,7 +48,11 @@ void delay_ms(uint32_t ms)
         __asm__("nop");
 }
 
-void bp_here(void) {__asm__ volatile ("bkpt #0");;} // fixed breakpoint for dbg
+void bp_here(void)
+{
+    __asm__ volatile("bkpt #0");
+    ;
+} // fixed breakpoint for dbg
 
 void jump_to_dfu(void) // not working very well...
 {
@@ -66,14 +70,15 @@ void jump_to_dfu(void) // not working very well...
     uint32_t jump_address = *bootloader_entry;
 
     // Set stack pointer from bootloader's vector table
-    __asm__ volatile ("msr msp, %0" : : "r" (*(volatile uint32_t *)SCB_VTOR));
+    __asm__ volatile("msr msp, %0" : : "r"(*(volatile uint32_t *)SCB_VTOR));
 
     // Jump to bootloader
     void (*bootloader)(void) = (void (*)(void))jump_address;
     bootloader();
 
     // Never returns
-    while(1);
+    while (1)
+        ;
 }
 
 int main(void)
@@ -81,9 +86,9 @@ int main(void)
     SCB_VTOR = 0x08000000; // reset after DFU, still missing something
 
     struct rcc_clock_scale pllconfig = rcc_hse_8mhz_3v3[RCC_CLOCK_3V3_170MHZ];
-	rcc_clock_setup_pll(&pllconfig);
+    rcc_clock_setup_pll(&pllconfig);
     systick_setup(170000000);
-    
+
     // LED output:
     rcc_periph_clock_enable(RCC_GPIOC);
     gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT,
@@ -99,13 +104,15 @@ int main(void)
     adc_dac_timer_init();
     ddsli_setup();
 
-    for(uint32_t i = 0; i < 1000000; i+=1) __asm__("nop");
+    for (uint32_t i = 0; i < 1000000; i += 1)
+        __asm__("nop");
 
     cm_enable_interrupts();
     adc_dac_timer_start();
 
     // Command parsing states
-    enum {
+    enum
+    {
         CMD_IDLE,
         CMD_FREQ,
         CMD_CAPT
@@ -114,9 +121,10 @@ int main(void)
     uint32_t cmd_value = 0;
     uint8_t cmd_digits = 0;
 
-    while(clock_ticks<300) __asm__("nop");
+    while (clock_ticks < 300)
+        __asm__("nop");
 
-	while (1)
+    while (1)
     {
         uint8_t buf[64];
         static float acc_ch0_cos = 0;
@@ -128,183 +136,213 @@ int main(void)
         uint8_t len = usbserial_read_rx(buf, 64);
         // usbserial_send_tx(buf,len);
 
-        for(uint32_t i = 0; i < len; i++)
+        for (uint32_t i = 0; i < len; i++)
         {
-            if(buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 10)
+            if (buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 10)
             {
                 cmd_value = cmd_value * 10 + (buf[i] - '0');
                 cmd_digits++;
             }
             else
             {
-                switch(cmd_state) {
-                    case CMD_IDLE: // Process command chars (or ignore)
-                        if(buf[i] == 'F' || buf[i] == 'f')
-                        {
-                            // Start frequency command
-                            cmd_state = CMD_FREQ;
-                            cmd_value = 0;
-                            cmd_digits = 0;
-                        }
-                        else if(buf[i] == 'A' || buf[i] == 'a')
-                        {
-                            // Start auto capture
-                            cmd_state = CMD_CAPT;
-                            cmd_value = 0;
-                            cmd_digits = 0;
-                        }
-                        else if(buf[i] == 'M' || buf[i] == 'm')
-                        {
-                            ddsli_capture_buffers(4);
-                            while(!ddsli_capture_ready()) __asm__("nop");
-                            usbserial_send_tx((uint8_t*)ddsli_get_capt_adc(),4*4*HB_LEN);
-                        }
-                        else if(buf[i] == 'D' || buf[i] == 'd')
-                        {
-                            while(n <= 50)
-                            {
-                                ddsli_output_t output;
-                                if(ddsli_output_pop(&output))
-                                {
-                                    acc_ch0_cos += output.chA[0];
-                                    acc_ch0_sin += output.chA[1];
-                                    acc_ch1_cos += output.chB[0];
-                                    acc_ch1_sin += output.chB[1];
-                                    acc_f += output.frequency.phase_inc>>30;
-                                    n++;
-                                }
-                            }
-
-                            acc_ch0_cos /= n;
-                            acc_ch0_sin /= n;
-                            acc_ch1_cos /= n;
-                            acc_ch1_sin /= n;
-                            acc_f /= 4*n;
-
-                            uint8_t outbuf[128];
-
-                            double f = (double)acc_f/(4294.96f);
-
-                            /* Amplitudes */
-                            float amp0 = sqrtf(acc_ch0_cos*acc_ch0_cos + acc_ch0_sin*acc_ch0_sin);
-                            float amp1 = sqrtf(acc_ch1_cos*acc_ch1_cos + acc_ch1_sin*acc_ch1_sin);
-
-                            /* Phases (radians) */
-                            float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
-                            float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
-
-                            /* Relative quantities */
-                            float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
-                            float dphi = phi0 - phi1;
-
-                            /* Wrap to [-pi, pi] */
-                            if (dphi >  M_PI) dphi -= 2.0f*M_PI;
-                            if (dphi < -M_PI) dphi += 2.0f*M_PI;
-
-                            char *p = (char *)outbuf;
-
-                            /* f %.3f Hz */
-                            *p++ = 'f'; *p++ = ' ';
-                            p = fmt_f(p, f, 0, 3);
-                            *p++ = ' '; *p++ = 'H'; *p++ = 'z';
-
-                            /* | CH0 %6.5f V %4.3f° */
-                            *p++ = ' '; *p++ = '|'; *p++ = ' ';
-                            *p++ = 'C'; *p++ = 'H'; *p++ = '0'; *p++ = ' ';
-                            p = fmt_f(p, amp0 / 3510.571f, 6, 5);
-                            *p++ = ' '; *p++ = 'V'; *p++ = ' ';
-                            p = fmt_f(p, phi0 * (180.0f / M_PI), 4, 3);
-                            *p++ = 0xC2; *p++ = 0xB0;
-
-                            /* | CH1 %6.5f V %4.3f° */
-                            *p++ = ' '; *p++ = '|'; *p++ = ' ';
-                            *p++ = 'C'; *p++ = 'H'; *p++ = '1'; *p++ = ' ';
-                            p = fmt_f(p, amp1 / 3510.571f, 6, 5);
-                            *p++ = ' '; *p++ = 'V'; *p++ = ' ';
-                            p = fmt_f(p, phi1 * (180.0f / M_PI), 4, 3);
-                            *p++ = 0xC2; *p++ = 0xB0;
-
-                            /* | rel %7.5f %7.3f° */
-                            *p++ = ' '; *p++ = '|'; *p++ = ' ';
-                            *p++ = 'r'; *p++ = 'e'; *p++ = 'l'; *p++ = ' ';
-                            p = fmt_f(p, amp_ratio, 7, 5);
-                            *p++ = ' ';
-                            p = fmt_f(p, dphi * (180.0f / M_PI), 7, 3);
-                            *p++ = 0xC2; *p++ = 0xB0;
-
-                            /* CRLF */
-                            *p++ = '\r';
-                            *p++ = '\n';
-
-                            uint8_t s = p - (char *)outbuf;
-
-                            usbserial_send_tx(outbuf, s);
-
-                            acc_ch0_cos = 0;
-                            acc_ch0_sin = 0;
-                            acc_ch1_cos = 0;
-                            acc_ch1_sin = 0;
-                            acc_f = 0;
-                            n = 0;
-                        }
-                        else if(buf[i] == 'P' || buf[i] == 'p')
-                        {
-                            uint32_t dcnt = 0;
-                            ddsli_output_t buf[16];
-                            while(dcnt < 16)
-                            {
-                                if(ddsli_output_pop(&buf[dcnt])) dcnt++;
-                            }
-                            usbserial_send_tx((uint8_t*)buf, sizeof(buf));
-                        }
-                        else if(buf[i] == 'S' || buf[i] == 's')
-                        {
-                            adc_dac_timer_stop();
-                        }
-                        else if(buf[i] == 'R' || buf[i] == 'r')
-                        {
-                            adc_dac_timer_start();
-                        }
-                        else
-                        {
-                            // Ignore and discard
-                        }
-                        break;
-                    case CMD_FREQ: // Non-numeric char received after "F/f"
-                        ddsli_set_frequency((float)cmd_value/10.73741824f, 0.0f, 1000000);
-
-                        cmd_state = CMD_IDLE;
+                switch (cmd_state)
+                {
+                case CMD_IDLE: // Process command chars (or ignore)
+                    if (buf[i] == 'F' || buf[i] == 'f')
+                    {
+                        // Start frequency command
+                        cmd_state = CMD_FREQ;
                         cmd_value = 0;
                         cmd_digits = 0;
-                        break;
-
-                    case CMD_CAPT: // Non-numeric char received after "M/m"
-                        auto_capture_dly = cmd_value;
-
-                        cmd_state = CMD_IDLE;
+                    }
+                    else if (buf[i] == 'A' || buf[i] == 'a')
+                    {
+                        // Start auto capture
+                        cmd_state = CMD_CAPT;
                         cmd_value = 0;
                         cmd_digits = 0;
-                        break;
+                    }
+                    else if (buf[i] == 'M' || buf[i] == 'm')
+                    {
+                        ddsli_capture_buffers(4);
+                        while (!ddsli_capture_ready())
+                            __asm__("nop");
+                        usbserial_send_tx((uint8_t *)ddsli_get_capt_adc(), 4 * 4 * HB_LEN);
+                    }
+                    else if (buf[i] == 'D' || buf[i] == 'd')
+                    {
+                        while (n <= 50)
+                        {
+                            ddsli_output_t output;
+                            if (ddsli_output_pop(&output))
+                            {
+                                acc_ch0_cos += output.chA[0];
+                                acc_ch0_sin += output.chA[1];
+                                acc_ch1_cos += output.chB[0];
+                                acc_ch1_sin += output.chB[1];
+                                acc_f += output.frequency.phase_inc >> 30;
+                                n++;
+                            }
+                        }
+
+                        acc_ch0_cos /= n;
+                        acc_ch0_sin /= n;
+                        acc_ch1_cos /= n;
+                        acc_ch1_sin /= n;
+                        acc_f /= 4 * n;
+
+                        uint8_t outbuf[128];
+
+                        double f = (double)acc_f / (4294.96f);
+
+                        /* Amplitudes */
+                        float amp0 = sqrtf(acc_ch0_cos * acc_ch0_cos + acc_ch0_sin * acc_ch0_sin);
+                        float amp1 = sqrtf(acc_ch1_cos * acc_ch1_cos + acc_ch1_sin * acc_ch1_sin);
+
+                        /* Phases (radians) */
+                        float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
+                        float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
+
+                        /* Relative quantities */
+                        float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
+                        float dphi = phi0 - phi1;
+
+                        /* Wrap to [-pi, pi] */
+                        if (dphi > M_PI)
+                            dphi -= 2.0f * M_PI;
+                        if (dphi < -M_PI)
+                            dphi += 2.0f * M_PI;
+
+                        char *p = (char *)outbuf;
+
+                        /* f %.3f Hz */
+                        *p++ = 'f';
+                        *p++ = ' ';
+                        p = fmt_f(p, f, 0, 3);
+                        *p++ = ' ';
+                        *p++ = 'H';
+                        *p++ = 'z';
+
+                        /* | CH0 %6.5f V %4.3f° */
+                        *p++ = ' ';
+                        *p++ = '|';
+                        *p++ = ' ';
+                        *p++ = 'C';
+                        *p++ = 'H';
+                        *p++ = '0';
+                        *p++ = ' ';
+                        p = fmt_f(p, amp0 / 3510.571f, 6, 5);
+                        *p++ = ' ';
+                        *p++ = 'V';
+                        *p++ = ' ';
+                        p = fmt_f(p, phi0 * (180.0f / M_PI), 4, 3);
+                        *p++ = 0xC2;
+                        *p++ = 0xB0;
+
+                        /* | CH1 %6.5f V %4.3f° */
+                        *p++ = ' ';
+                        *p++ = '|';
+                        *p++ = ' ';
+                        *p++ = 'C';
+                        *p++ = 'H';
+                        *p++ = '1';
+                        *p++ = ' ';
+                        p = fmt_f(p, amp1 / 3510.571f, 6, 5);
+                        *p++ = ' ';
+                        *p++ = 'V';
+                        *p++ = ' ';
+                        p = fmt_f(p, phi1 * (180.0f / M_PI), 4, 3);
+                        *p++ = 0xC2;
+                        *p++ = 0xB0;
+
+                        /* | rel %7.5f %7.3f° */
+                        *p++ = ' ';
+                        *p++ = '|';
+                        *p++ = ' ';
+                        *p++ = 'r';
+                        *p++ = 'e';
+                        *p++ = 'l';
+                        *p++ = ' ';
+                        p = fmt_f(p, amp_ratio, 7, 5);
+                        *p++ = ' ';
+                        p = fmt_f(p, dphi * (180.0f / M_PI), 7, 3);
+                        *p++ = 0xC2;
+                        *p++ = 0xB0;
+
+                        /* CRLF */
+                        *p++ = '\r';
+                        *p++ = '\n';
+
+                        uint8_t s = p - (char *)outbuf;
+
+                        usbserial_send_tx(outbuf, s);
+
+                        acc_ch0_cos = 0;
+                        acc_ch0_sin = 0;
+                        acc_ch1_cos = 0;
+                        acc_ch1_sin = 0;
+                        acc_f = 0;
+                        n = 0;
+                    }
+                    else if (buf[i] == 'P' || buf[i] == 'p')
+                    {
+                        uint32_t dcnt = 0;
+                        ddsli_output_t buf[16];
+                        while (dcnt < 16)
+                        {
+                            if (ddsli_output_pop(&buf[dcnt]))
+                                dcnt++;
+                        }
+                        usbserial_send_tx((uint8_t *)buf, sizeof(buf));
+                    }
+                    else if (buf[i] == 'S' || buf[i] == 's')
+                    {
+                        adc_dac_timer_stop();
+                    }
+                    else if (buf[i] == 'R' || buf[i] == 'r')
+                    {
+                        adc_dac_timer_start();
+                    }
+                    else
+                    {
+                        // Ignore and discard
+                    }
+                    break;
+                case CMD_FREQ: // Non-numeric char received after "F/f"
+                    ddsli_set_frequency((float)cmd_value / 10.73741824f, 0.0f, 1000000);
+
+                    cmd_state = CMD_IDLE;
+                    cmd_value = 0;
+                    cmd_digits = 0;
+                    break;
+
+                case CMD_CAPT: // Non-numeric char received after "M/m"
+                    auto_capture_dly = cmd_value;
+
+                    cmd_state = CMD_IDLE;
+                    cmd_value = 0;
+                    cmd_digits = 0;
+                    break;
                 }
             }
         }
 
-        if(auto_capture_dly)
+        if (auto_capture_dly)
         {
             static uint32_t acd_cnt = 0;
-            if((clock_ticks/auto_capture_dly) != acd_cnt)
+            if ((clock_ticks / auto_capture_dly) != acd_cnt)
             {
-                acd_cnt = clock_ticks/auto_capture_dly;
+                acd_cnt = clock_ticks / auto_capture_dly;
                 ddsli_capture_buffers(4);
-                while(!ddsli_capture_ready()) __asm__("nop");
-                usbserial_send_tx((uint8_t*)ddsli_get_capt_adc(),4*4*HB_LEN);
+                while (!ddsli_capture_ready())
+                    __asm__("nop");
+                usbserial_send_tx((uint8_t *)ddsli_get_capt_adc(), 4 * 4 * HB_LEN);
             }
         }
 
-        if((clock_ticks/2) != lasttick)
+        if ((clock_ticks / 2) != lasttick)
         {
-            lasttick = clock_ticks/2;
+            lasttick = clock_ticks / 2;
         }
-
-	}
+    }
 }

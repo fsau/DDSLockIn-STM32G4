@@ -10,7 +10,8 @@ volatile uint32_t adc_buffer[ADC_BUF_LEN];
 volatile uint32_t adc_capture_complete = 0;
 volatile uint32_t adc_capture_counter = 0;
 
-void adc_dual_dma_sigleshot_init(void) {
+void adc_dual_dma_sigleshot_init(void)
+{
     rcc_periph_clock_enable(RCC_GPIOA);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO6);
 
@@ -21,12 +22,14 @@ void adc_dual_dma_sigleshot_init(void) {
     adc_disable_deeppwd(ADC1);
     adc_disable_deeppwd(ADC2);
 
-    for (volatile int i = 0; i < 10000; i++) __asm__("nop");
+    for (volatile int i = 0; i < 10000; i++)
+        __asm__("nop");
 
     adc_enable_regulator(ADC1);
     adc_enable_regulator(ADC2);
 
-    for (volatile int i = 0; i < 10000; i++) __asm__("nop");
+    for (volatile int i = 0; i < 10000; i++)
+        __asm__("nop");
 
     adc_power_off(ADC1);
     adc_power_off(ADC2);
@@ -34,37 +37,39 @@ void adc_dual_dma_sigleshot_init(void) {
     ADC_CR(ADC1) &= ~ADC_CR_ADCALDIF;
     ADC_CR(ADC2) &= ~ADC_CR_ADCALDIF;
 
-    adc_set_clk_source(ADC1,ADC_CCR_CKMODE_DIV4);
-    adc_set_resolution(ADC1,ADC_CFGR1_RES_12_BIT);
-    adc_set_resolution(ADC2,ADC_CFGR1_RES_12_BIT);
+    adc_set_clk_source(ADC1, ADC_CCR_CKMODE_DIV4);
+    adc_set_resolution(ADC1, ADC_CFGR1_RES_12_BIT);
+    adc_set_resolution(ADC2, ADC_CFGR1_RES_12_BIT);
 
-    for (volatile int i = 0; i < 1000000; i++) __asm__("nop");
+    for (volatile int i = 0; i < 1000000; i++)
+        __asm__("nop");
 
     adc_calibrate(ADC1);
     adc_calibrate(ADC2);
 
-    for (volatile int i = 0; i < 10000; i++) __asm__("nop");
+    for (volatile int i = 0; i < 10000; i++)
+        __asm__("nop");
 
     /*  Configure ADC1 (Master) */
     // Use continuous conversion mode for free-running
     adc_set_continuous_conversion_mode(ADC1);
     adc_set_right_aligned(ADC1);
-    adc_set_sample_time(ADC1, 0, ADC_SMPR_SMP_2DOT5CYC);  // Fastest sampling
+    adc_set_sample_time(ADC1, 0, ADC_SMPR_SMP_2DOT5CYC); // Fastest sampling
 
-    uint8_t adc1_channels[] = {3};  // Channel 3 (PA2)
+    uint8_t adc1_channels[] = {3}; // Channel 3 (PA2)
     adc_set_regular_sequence(ADC1, 1, adc1_channels);
 
     /*  Configure ADC2 (Slave) */
     adc_set_continuous_conversion_mode(ADC2);
     adc_set_right_aligned(ADC2);
-    adc_set_sample_time(ADC2, 1, ADC_SMPR_SMP_2DOT5CYC);  // Fastest sampling
+    adc_set_sample_time(ADC2, 1, ADC_SMPR_SMP_2DOT5CYC); // Fastest sampling
 
-    uint8_t adc2_channels[] = {3};  // Channel 3 (PA6)
+    uint8_t adc2_channels[] = {3}; // Channel 3 (PA6)
     adc_set_regular_sequence(ADC2, 1, adc2_channels);
 
-    ADC_CFGR1(ADC1) |= (1<<31); // JQDIS: Injected Queue disable
+    ADC_CFGR1(ADC1) |= (1 << 31); // JQDIS: Injected Queue disable
     ADC_CFGR1(ADC1) |= ADC_CFGR1_OVRMOD;
-    ADC_CFGR1(ADC2) |= (1<<31); // JQDIS: Injected Queue disable
+    ADC_CFGR1(ADC2) |= (1 << 31); // JQDIS: Injected Queue disable
     ADC_CFGR1(ADC2) |= ADC_CFGR1_OVRMOD;
 
     /*  Configure Dual Mode - Regular Simultaneous */
@@ -97,8 +102,7 @@ void adc_dual_dma_sigleshot_init(void) {
     dmamux_set_dma_channel_request(
         DMAMUX1,
         DMA_CHANNEL1,
-        DMAMUX_CxCR_DMAREQ_ID_ADC1
-    );
+        DMAMUX_CxCR_DMAREQ_ID_ADC1);
 
     /*  Enable DMA for ADC1 */
     adc_enable_dma(ADC1);
@@ -116,10 +120,11 @@ void adc_dual_dma_sigleshot_init(void) {
     ADC_CFGR1(ADC1) &= ~ADC_CFGR1_CONT; // disable continuous mode
 
     adc_enable_external_trigger_regular(ADC1,
-        ADC12_CFGR1_EXTSEL_TIM3_CC4, ADC_CFGR1_EXTEN_FALLING_EDGE);
+                                        ADC12_CFGR1_EXTSEL_TIM3_CC4, ADC_CFGR1_EXTEN_FALLING_EDGE);
 }
 
-void adc_dual_dma_circular_init(void *buf, uint32_t len) {
+void adc_dual_dma_circular_init(void *buf, uint32_t len)
+{
     rcc_periph_clock_enable(RCC_GPIOA);
     gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO6);
 
@@ -130,12 +135,14 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len) {
     adc_disable_deeppwd(ADC1);
     adc_disable_deeppwd(ADC2);
 
-    for (volatile int i = 0; i < 10000; i++) __asm__("nop");
+    for (volatile int i = 0; i < 10000; i++)
+        __asm__("nop");
 
     adc_enable_regulator(ADC1);
     adc_enable_regulator(ADC2);
 
-    for (volatile int i = 0; i < 10000; i++) __asm__("nop");
+    for (volatile int i = 0; i < 10000; i++)
+        __asm__("nop");
 
     adc_power_off(ADC1);
     adc_power_off(ADC2);
@@ -143,11 +150,12 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len) {
     ADC_CR(ADC1) &= ~ADC_CR_ADCALDIF;
     ADC_CR(ADC2) &= ~ADC_CR_ADCALDIF;
 
-    adc_set_clk_source(ADC1,ADC_CCR_CKMODE_DIV4);
-    adc_set_resolution(ADC1,ADC_CFGR1_RES_12_BIT);
-    adc_set_resolution(ADC2,ADC_CFGR1_RES_12_BIT);
+    adc_set_clk_source(ADC1, ADC_CCR_CKMODE_DIV4);
+    adc_set_resolution(ADC1, ADC_CFGR1_RES_12_BIT);
+    adc_set_resolution(ADC2, ADC_CFGR1_RES_12_BIT);
 
-    for (volatile int i = 0; i < 1000000; i++) __asm__("nop");
+    for (volatile int i = 0; i < 1000000; i++)
+        __asm__("nop");
 
     adc_calibrate(ADC1);
     adc_calibrate(ADC2);
@@ -155,27 +163,28 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len) {
     adc_power_on(ADC1);
     adc_power_on(ADC2);
 
-    for (volatile int i = 0; i < 10000; i++) __asm__("nop");
+    for (volatile int i = 0; i < 10000; i++)
+        __asm__("nop");
 
     /*  Configure ADC1 (Master) */
     adc_set_single_conversion_mode(ADC1);
     adc_set_right_aligned(ADC1);
-    adc_set_sample_time(ADC1, 0, ADC_SMPR_SMP_2DOT5CYC);  // Fastest sampling
+    adc_set_sample_time(ADC1, 0, ADC_SMPR_SMP_2DOT5CYC); // Fastest sampling
 
-    uint8_t adc1_channels[] = {3};  // Channel 3 (PA2)
+    uint8_t adc1_channels[] = {3}; // Channel 3 (PA2)
     adc_set_regular_sequence(ADC1, 1, adc1_channels);
 
     /*  Configure ADC2 (Slave) */
     adc_set_single_conversion_mode(ADC2);
     adc_set_right_aligned(ADC2);
-    adc_set_sample_time(ADC2, 1, ADC_SMPR_SMP_2DOT5CYC);  // Fastest sampling
+    adc_set_sample_time(ADC2, 1, ADC_SMPR_SMP_2DOT5CYC); // Fastest sampling
 
-    uint8_t adc2_channels[] = {3};  // Channel 3 (PA6)
+    uint8_t adc2_channels[] = {3}; // Channel 3 (PA6)
     adc_set_regular_sequence(ADC2, 1, adc2_channels);
 
-    ADC_CFGR1(ADC1) |= (1<<31); // JQDIS: Injected Queue disable
+    ADC_CFGR1(ADC1) |= (1 << 31); // JQDIS: Injected Queue disable
     ADC_CFGR1(ADC1) |= ADC_CFGR1_OVRMOD;
-    ADC_CFGR1(ADC2) |= (1<<31); // JQDIS: Injected Queue disable
+    ADC_CFGR1(ADC2) |= (1 << 31); // JQDIS: Injected Queue disable
     ADC_CFGR1(ADC2) |= ADC_CFGR1_OVRMOD;
 
     /*  Configure Dual Mode - Regular Simultaneous */
@@ -183,7 +192,7 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len) {
     ADC_CCR(ADC1) |= ADC_CCR_MDMA_12_10_BIT;
 
     adc_enable_external_trigger_regular(ADC1,
-        ADC12_CFGR1_EXTSEL_TIM3_CC4, ADC_CFGR1_EXTEN_FALLING_EDGE);
+                                        ADC12_CFGR1_EXTSEL_TIM3_CC4, ADC_CFGR1_EXTEN_FALLING_EDGE);
 
     /*  Configure DMA */
     dma_channel_reset(DMA1, DMA_CHANNEL1);
@@ -206,8 +215,7 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len) {
     dmamux_set_dma_channel_request(
         DMAMUX1,
         DMA_CHANNEL1,
-        DMAMUX_CxCR_DMAREQ_ID_ADC1
-    );
+        DMAMUX_CxCR_DMAREQ_ID_ADC1);
 
     // Enable transfer complete/half interrupt
     dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
@@ -226,7 +234,8 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len) {
     adc_start_conversion_regular(ADC1);
 }
 
-void adc_capture_singleshot_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
+void adc_capture_singleshot_buffer(uint16_t *adc1_data, uint16_t *adc2_data)
+{
     /* Reset DMA configuration */
     dma_disable_channel(DMA1, DMA_CHANNEL1);
 
@@ -244,8 +253,8 @@ void adc_capture_singleshot_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
     adc_set_right_aligned(ADC1);
     adc_set_right_aligned(ADC2);
 
-    uint8_t adc1_channels[] = {3};  // Channel 3 (PA2)
-    uint8_t adc2_channels[] = {3};  // Channel 3 (PA6)
+    uint8_t adc1_channels[] = {3}; // Channel 3 (PA2)
+    uint8_t adc2_channels[] = {3}; // Channel 3 (PA6)
     adc_set_regular_sequence(ADC1, 1, adc1_channels);
     adc_set_regular_sequence(ADC2, 1, adc2_channels);
 
@@ -263,21 +272,24 @@ void adc_capture_singleshot_buffer(uint16_t *adc1_data, uint16_t *adc2_data) {
     adc_start_conversion_regular(ADC1);
 
     /* Wait for DMA transfer to complete */
-    while (!adc_capture_complete) {
+    while (!adc_capture_complete)
+    {
         __asm__("nop");
-        if(ADC_ISR(ADC1) & ADC_ISR_EOS)
+        if (ADC_ISR(ADC1) & ADC_ISR_EOS)
             adc_start_conversion_regular(ADC1);
     }
 
     /* De-interleave the packed 32-bit data */
-    for (int i = 0; i < ADC_BUF_LEN; i++) {
+    for (int i = 0; i < ADC_BUF_LEN; i++)
+    {
         uint32_t packed = adc_buffer[i];
         adc1_data[i] = (uint16_t)(packed & 0xFFFF);
         adc2_data[i] = (uint16_t)(packed >> 16);
     }
 }
 
-void adc_start_continuous_mode(void) {
+void adc_start_continuous_mode(void)
+{
     /* Configure DMA for circular mode */
     DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_CIRC;
 
@@ -285,7 +297,8 @@ void adc_start_continuous_mode(void) {
     adc_start_conversion_regular(ADC1);
 }
 
-void adc_stop_continuous_mode(void) {
+void adc_stop_continuous_mode(void)
+{
     /* Stop conversions */
     ADC_CR(ADC1) &= ~ADC_CR_ADSTART;
 
@@ -293,20 +306,24 @@ void adc_stop_continuous_mode(void) {
     DMA_CCR(DMA1, DMA_CHANNEL1) &= ~DMA_CCR_CIRC;
 }
 
-void dma1_channel1_isr(void) {
-    if (dma_get_interrupt_flag(DMA1, DMA_CHANNEL1, DMA_TCIF)) {
+void dma1_channel1_isr(void)
+{
+    if (dma_get_interrupt_flag(DMA1, DMA_CHANNEL1, DMA_TCIF))
+    {
         dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_TCIF);
         adc_capture_complete++;
-        adc_capture_counter+=2;
-        adc_capture_counter&=~1;
+        adc_capture_counter += 2;
+        adc_capture_counter &= ~1;
     }
-    if (dma_get_interrupt_flag(DMA1, DMA_CHANNEL1, DMA_HTIF)) {
+    if (dma_get_interrupt_flag(DMA1, DMA_CHANNEL1, DMA_HTIF))
+    {
         dma_clear_interrupt_flags(DMA1, DMA_CHANNEL1, DMA_HTIF);
-        adc_capture_counter+=2;
-        adc_capture_counter|=1;
+        adc_capture_counter += 2;
+        adc_capture_counter |= 1;
     }
-    if(ADC_ISR(ADC1) & ADC_ISR_EOS) {
-        ADC_ISR(ADC1) |= ADC_ISR_EOS;  // Clear flag
-        adc_start_conversion_regular(ADC1);  // Restart
+    if (ADC_ISR(ADC1) & ADC_ISR_EOS)
+    {
+        ADC_ISR(ADC1) |= ADC_ISR_EOS;       // Clear flag
+        adc_start_conversion_regular(ADC1); // Restart
     }
 }
