@@ -113,6 +113,6 @@ bool ddsli_capture_ready(void);
 /* Reads captured buffers */
 bool dssli_capture_read(uint32_t *adc, uint32_t *ref);
 
-/* Or get the buffer directly (check if it's CCM/RAM) */
+/* Or get the buffer directly (check if it's CCM) */
 uint32_t *ddsli_get_capt_adc(void);
 uint32_t *ddsli_get_capt_ref(void);

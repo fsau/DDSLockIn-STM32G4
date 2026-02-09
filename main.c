@@ -1,4 +1,4 @@
-#include <stdio.h>
+// #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <libopencm3/stm32/rcc.h>
@@ -17,6 +17,7 @@
 #include "dac.h"
 #include "ddsli.h"
 #include "timers.h"
+#include "utils.h"
 
 volatile uint32_t clock_ticks = 0;
 uint32_t lasttick = 0;
@@ -39,7 +40,7 @@ void systick_setup(uint32_t sysclk_hz)
     nvic_enable_irq(NVIC_SYSTICK_IRQ);
 }
 
-// Delay in milliseconds
+// Blocking delay in milliseconds
 void delay_ms(uint32_t ms)
 {
     uint32_t start = clock_ticks;
@@ -47,7 +48,7 @@ void delay_ms(uint32_t ms)
         __asm__("nop");
 }
 
-void bp_here(void) {__asm__ volatile ("bkpt #0");;}
+void bp_here(void) {__asm__ volatile ("bkpt #0");;} // fixed breakpoint for dbg
 
 void jump_to_dfu(void) // not working very well...
 {
@@ -77,14 +78,14 @@ void jump_to_dfu(void) // not working very well...
 
 int main(void)
 {
-    SCB_VTOR = 0x08000000;
+    SCB_VTOR = 0x08000000; // reset after DFU, still missing something
 
     struct rcc_clock_scale pllconfig = rcc_hse_8mhz_3v3[RCC_CLOCK_3V3_170MHZ];
 	rcc_clock_setup_pll(&pllconfig);
-    systick_setup(170000000); // 1kHz
+    systick_setup(170000000);
+    
+    // LED output:
     rcc_periph_clock_enable(RCC_GPIOC);
-    cm_enable_interrupts();
-
     gpio_mode_setup(GPIOC, GPIO_MODE_OUTPUT,
                     GPIO_PUPD_NONE, GPIO6);
     gpio_set_output_options(GPIOC,
@@ -95,11 +96,12 @@ int main(void)
 
     dma_memcpy_init();
     usbserial_init();
-    adc_dac_timer_load();
+    adc_dac_timer_init();
     ddsli_setup();
 
     for(uint32_t i = 0; i < 1000000; i+=1) __asm__("nop");
 
+    cm_enable_interrupts();
     adc_dac_timer_start();
 
     // Command parsing states
@@ -128,32 +130,37 @@ int main(void)
 
         for(uint32_t i = 0; i < len; i++)
         {
-            if(buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 10) {
+            if(buf[i] >= '0' && buf[i] <= '9' && cmd_digits < 10)
+            {
                 cmd_value = cmd_value * 10 + (buf[i] - '0');
                 cmd_digits++;
             }
             else
             {
                 switch(cmd_state) {
-                    case CMD_IDLE:
-                        if(buf[i] == 'F' || buf[i] == 'f') {
+                    case CMD_IDLE: // Process command chars (or ignore)
+                        if(buf[i] == 'F' || buf[i] == 'f')
+                        {
                             // Start frequency command
                             cmd_state = CMD_FREQ;
                             cmd_value = 0;
                             cmd_digits = 0;
                         }
-                        else if(buf[i] == 'A' || buf[i] == 'a') {
+                        else if(buf[i] == 'A' || buf[i] == 'a')
+                        {
                             // Start auto capture
                             cmd_state = CMD_CAPT;
                             cmd_value = 0;
                             cmd_digits = 0;
                         }
-                        else if(buf[i] == 'M' || buf[i] == 'm') {
+                        else if(buf[i] == 'M' || buf[i] == 'm')
+                        {
                             ddsli_capture_buffers(4);
                             while(!ddsli_capture_ready()) __asm__("nop");
                             usbserial_send_tx((uint8_t*)ddsli_get_capt_adc(),4*4*HB_LEN);
                         }
-                        else if(buf[i] == 'D' || buf[i] == 'd') {
+                        else if(buf[i] == 'D' || buf[i] == 'd')
+                        {
                             ddsli_output_t output;
                             while(ddsli_output_pop(&output))
                             {
@@ -191,15 +198,42 @@ int main(void)
                                 if (dphi >  M_PI) dphi -= 2.0f*M_PI;
                                 if (dphi < -M_PI) dphi += 2.0f*M_PI;
 
-                                uint8_t s = snprintf(
-                                    (char *)outbuf, sizeof(outbuf),
-                                    "f %.3f Hz | CH0 %6.5f V %4.3f° | CH1 %6.5f V %4.3f° | "
-                                    "rel %7.5f %7.3f°\r\n", f,
-                                    amp0/3510.571, phi0 * (180.0f/M_PI),
-                                    amp1/3510.571, phi1 * (180.0f/M_PI),
-                                    amp_ratio,
-                                    dphi * (180.0f/M_PI)
-                                );
+                                char *p = (char *)outbuf;
+
+                                /* f %.3f Hz */
+                                *p++ = 'f'; *p++ = ' ';
+                                p = fmt_f(p, f, 0, 3);
+                                *p++ = ' '; *p++ = 'H'; *p++ = 'z';
+
+                                /* | CH0 %6.5f V %4.3f° */
+                                *p++ = ' '; *p++ = '|'; *p++ = ' ';
+                                *p++ = 'C'; *p++ = 'H'; *p++ = '0'; *p++ = ' ';
+                                p = fmt_f(p, amp0 / 3510.571f, 6, 5);
+                                *p++ = ' '; *p++ = 'V'; *p++ = ' ';
+                                p = fmt_f(p, phi0 * (180.0f / M_PI), 4, 3);
+                                *p++ = 0xC2; *p++ = 0xB0;
+
+                                /* | CH1 %6.5f V %4.3f° */
+                                *p++ = ' '; *p++ = '|'; *p++ = ' ';
+                                *p++ = 'C'; *p++ = 'H'; *p++ = '1'; *p++ = ' ';
+                                p = fmt_f(p, amp1 / 3510.571f, 6, 5);
+                                *p++ = ' '; *p++ = 'V'; *p++ = ' ';
+                                p = fmt_f(p, phi1 * (180.0f / M_PI), 4, 3);
+                                *p++ = 0xC2; *p++ = 0xB0;
+
+                                /* | rel %7.5f %7.3f° */
+                                *p++ = ' '; *p++ = '|'; *p++ = ' ';
+                                *p++ = 'r'; *p++ = 'e'; *p++ = 'l'; *p++ = ' ';
+                                p = fmt_f(p, amp_ratio, 7, 5);
+                                *p++ = ' ';
+                                p = fmt_f(p, dphi * (180.0f / M_PI), 7, 3);
+                                *p++ = 0xC2; *p++ = 0xB0;
+
+                                /* CRLF */
+                                *p++ = '\r';
+                                *p++ = '\n';
+
+                                uint8_t s = p - (char *)outbuf;
 
                                 usbserial_send_tx(outbuf, s);
 
@@ -211,7 +245,8 @@ int main(void)
                                 n = 0;
                             }
                         }
-                        else if(buf[i] == 'P' || buf[i] == 'p') {
+                        else if(buf[i] == 'P' || buf[i] == 'p')
+                        {
                             static uint32_t dcnt = 0;
                             ddsli_output_t buf[16];
                             while(ddsli_output_pop(&buf[dcnt]))
@@ -224,14 +259,20 @@ int main(void)
                                 }
                             }
                         }
-                        else if(buf[i] == 'S' || buf[i] == 's') {
+                        else if(buf[i] == 'S' || buf[i] == 's')
+                        {
                             adc_dac_timer_stop();
                         }
-                        else if(buf[i] == 'R' || buf[i] == 'r') {
+                        else if(buf[i] == 'R' || buf[i] == 'r')
+                        {
                             adc_dac_timer_start();
                         }
+                        else
+                        {
+                            // Ignore and discard
+                        }
                         break;
-                    case CMD_FREQ:
+                    case CMD_FREQ: // Non-numeric char received after "F/f"
                         ddsli_set_frequency((float)cmd_value/10.73741824f, 0.0f, 1000000);
 
                         cmd_state = CMD_IDLE;
@@ -239,7 +280,7 @@ int main(void)
                         cmd_digits = 0;
                         break;
 
-                    case CMD_CAPT:
+                    case CMD_CAPT: // Non-numeric char received after "M/m"
                         auto_capture_dly = cmd_value;
 
                         cmd_state = CMD_IDLE;

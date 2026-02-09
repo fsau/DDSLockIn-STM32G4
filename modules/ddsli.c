@@ -41,6 +41,7 @@
 #include "adc.h"
 #include "dac.h"
 #include "dma_memcpy.h"
+#include "utils.h"
 
 // -----------------------------------------------------------------------------
 // Private type definitions
@@ -297,7 +298,7 @@ static inline void ddsli_process_dac_copy_double(
 }
 
 // Simple copy
-static inline void ddsli_process_dac_copy_single(
+static inline void ddsli_process_dac_copy_single90deg(
     volatile cordic_out_sample_t *sincos_src,
     volatile dual_adc_sample_t *dac_dest,
     uint32_t len,
@@ -320,8 +321,10 @@ static inline void ddsli_process_dac_halfbuffer(uint32_t dac_half_idx,
 // Dual ADC Mixing: ADC × sincos → Demodulation products → Output FIFO
 // -----------------------------------------------------------------------------
 
-// Mix/multiplier + block integrator
-static inline void ddsli_mix_adc_sincos(
+// Mix/multiplier + block integrator and pass to FIFO.
+// Needs better windowing ans real low pass filtering.
+// But hey it works.
+static inline ddsli_output_t ddsli_mix_adc_sincos(
     volatile dual_adc_sample_t *adc_src,
     volatile cordic_out_sample_t *sincos_src,
     uint32_t len)
@@ -343,16 +346,21 @@ static inline void ddsli_mix_adc_sincos(
         acc_ch1_sin += adc_ch1 * sin_val;
     }
 
-    uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
-    const float scale = 1.0f / 32768.0f / (len / 2);
-    lpf_fifo[lpf_fifo_wr].chA[0] = acc_ch0_cos * scale;
-    lpf_fifo[lpf_fifo_wr].chA[1] = acc_ch0_sin * scale;
-    lpf_fifo[lpf_fifo_wr].chB[0] = acc_ch1_cos * scale;
-    lpf_fifo[lpf_fifo_wr].chB[1] = acc_ch1_sin * scale;
-    lpf_fifo_wr = next_wr;
+    ddsli_output_t ret;
+
+    ret.chA[0] = acc_ch0_cos;
+    ret.chA[1] = acc_ch0_sin;
+    ret.chA[2] = 0;
+
+    ret.chB[0] = acc_ch1_cos;
+    ret.chB[1] = acc_ch1_sin;
+    ret.chB[2] = 0;
+
+    return ret;
 }
 
-// Only copy buffer
+// Only copy buffer to capture, don't demux (mostly for debugging)
+// TODO: Do it with DMA, CCR can be addressed using offset
 static inline void ddsli_capt_adc_sincos(
     volatile dual_adc_sample_t *adc_src,
     volatile cordic_out_sample_t *sincos_src,
@@ -370,7 +378,8 @@ static inline void ddsli_capt_adc_sincos(
     }
 }
 
-// Least squares regression with 2 components + DC
+// Least squares regression with 2 components + DC using floats.
+// Currently returns the fitted values.
 static inline ddsli_output_t ddsli_lsr_adc_sincos(
     volatile dual_adc_sample_t   *adc_src,
     volatile cordic_out_sample_t *sincos_src,
@@ -477,22 +486,23 @@ static inline void ddsli_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sinc
             capture_buffer = CAPT_BUFF_HALVES;
 
         uint32_t ofs = (CAPT_BUFF_HALVES - capture_buffer)*HB_LEN;
-        for(uint32_t i = 0; i < HB_LEN; i++)
-        {
-            adc_captbuf[ofs+i] = adc_src[i];
-            sincos_captbuf[ofs+i] = sincos_src[i];
-        }
-        out = ddsli_lsr_adc_sincos(&adc_captbuf[ofs], &sincos_captbuf[ofs], HB_LEN);
+
+        // for(uint32_t i = 0; i < HB_LEN; i++)
+        // {
+        //     adc_captbuf[ofs+i] = adc_src[i];
+        //     sincos_captbuf[ofs+i] = sincos_src[i];
+        // }
+
+        dma_memcpy32((uint32_t*)&adc_captbuf[ofs]+CCM_ALIAS_OFFS, (uint32_t*)&adc_src, HB_LEN);
+        // dma_memcpy32((uint32_t*)&sincos_captbuf[ofs]+CCM_ALIAS_OFFS, (uint32_t*)&sincos_src, HB_LEN);
         capture_buffer--;
     }
-    else
-    {
-        out = ddsli_lsr_adc_sincos(adc_src, sincos_src, HB_LEN);
-    }
+
+    out = ddsli_lsr_adc_sincos(adc_src, sincos_src, HB_LEN);
+
     uint32_t next_wr = (lpf_fifo_wr + 1) % LPF_FIFO_LEN;
 
     lpf_fifo[lpf_fifo_wr].frequency = sincos_buf_phase[sincos_offset%SINCOS_BUFF_HALVES];
-    // lpf_fifo[lpf_fifo_wr].frequency = phase_dds;
 
     lpf_fifo[lpf_fifo_wr].chA[0] = out.chA[0];
     lpf_fifo[lpf_fifo_wr].chA[1] = out.chA[1];
@@ -758,7 +768,7 @@ bool ddsli_capture_read(uint32_t *adc, uint32_t *ref)
     return true;
 }
 
-/* Or get the buffer directly (check if it's CCM/RAM) */
+/* Or get the buffer directly (watchout it might be in CCM) */
 uint32_t *ddsli_get_capt_adc(void)
 {
     return (uint32_t *)adc_captbuf;
@@ -772,7 +782,7 @@ uint32_t *ddsli_get_capt_ref(void)
 // Main update routine, runs in low priority ISR for low latency
 void pend_sv_handler(void) {
     SCB_ICSR |= SCB_ICSR_PENDSVCLR;
-    gpio_set(GPIOC, GPIO6);
+    gpio_set(GPIOC, GPIO6); // tracing/debug output
     ddsli_step();
     gpio_clear(GPIOC, GPIO6);
 }

@@ -4,7 +4,7 @@
 #include <libopencm3/cm3/cortex.h>
 #include "timers.h"
 
-void adc_dac_timer_load(void)
+void adc_dac_timer_init(void)
 {
     rcc_periph_clock_enable(RCC_TIM4);  // Master timer: DAC
     rcc_periph_clock_enable(RCC_TIM3);  // Slave timer: ADC

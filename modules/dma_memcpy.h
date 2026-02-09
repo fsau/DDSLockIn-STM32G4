@@ -10,7 +10,8 @@ extern "C" {
 
 // Function prototypes
 bool dma_memcpy_init(void);
-bool dma_memcpy32(volatile uint32_t *dest, volatile uint32_t *src, uint32_t size);
+uint32_t dma_memcpy32(volatile uint32_t *dest, volatile uint32_t *src, uint32_t size);
+bool dma_memcpy_is_complete(uint32_t id);
 
 #ifdef __cplusplus
 }
