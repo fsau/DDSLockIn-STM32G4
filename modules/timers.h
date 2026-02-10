@@ -23,5 +23,6 @@
 
 void adc_dac_timer_init(void);
 void adc_dac_timer_start(void);
+void adc_dac_timer_restart(void);
 void adc_dac_timer_stop(void);
 void adc_dac_timer_adjust(uint32_t rate, uint8_t prescaler);

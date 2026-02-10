@@ -8,6 +8,7 @@ void adc_dac_timer_init(void)
 {
     rcc_periph_clock_enable(RCC_TIM4); // Master timer: DAC
     rcc_periph_clock_enable(RCC_TIM3); // Slave timer: ADC
+    // rcc_periph_clock_enable(RCC_GPIOB);
 
     uint32_t timer_clk = 170000000; // APB2 timer clock (170 MHz)
     uint32_t adc_rate = 1000000;    // 2 MSa/s
@@ -24,10 +25,10 @@ void adc_dac_timer_init(void)
     //                         GPIO_OTYPE_PP,
     //                         GPIO_OSPEED_2MHZ,
     //                         GPIO9);
-    // gpio_set_af(GPIOB, GPIO_AF2, GPIO9);
-    // timer_set_oc_mode(TIM4, TIM_OC4, TIM_OCM_PWM1);
-    // timer_set_oc_value(TIM4, TIM_OC4, arr / 2); // 50% duty
-    // timer_enable_oc_output(TIM4, TIM_OC4); // Debug PWM output
+    // gpio_set_af(GPIOB, GPIO_AF2, GPIO9); // Debug output
+    timer_set_oc_mode(TIM4, TIM_OC4, TIM_OCM_PWM1);
+    timer_set_oc_value(TIM4, TIM_OC4, arr / 2); // 50% duty
+    timer_enable_oc_output(TIM4, TIM_OC4); // Used as DAC DMA trigger
     TIM_DIER(TIM4) |= TIM_DIER_CC4DE; // Enable DMA output for DAC
 
     timer_set_prescaler(TIM3, prescaler);
@@ -48,13 +49,21 @@ void adc_dac_timer_init(void)
     // timer_set_oc_value(TIM3, TIM_OC3, arr / 2); // Debug PWM duty
     timer_set_oc_value(TIM3, TIM_OC4, arr / 2); // Tune ADC timing here
     // timer_enable_oc_output(TIM3, TIM_OC3); // Debug PWM output
-    timer_enable_oc_output(TIM3, TIM_OC4); // ADC
+    timer_enable_oc_output(TIM3, TIM_OC4); // ADC trigger
 }
 
 void adc_dac_timer_start(void)
 {
     timer_enable_counter(TIM4);
+}
+
+void adc_dac_timer_restart(void)
+{
+    cm_disable_interrupts();
+    timer_slave_set_mode(TIM3, TIM_SMCR_SMS_RM); // Make sure they get in sync
+    timer_enable_counter(TIM4);
     timer_enable_counter(TIM3);
+    cm_enable_interrupts();
 }
 
 void adc_dac_timer_stop(void)
@@ -62,12 +71,12 @@ void adc_dac_timer_stop(void)
     cm_disable_interrupts();
     
     uint32_t t = TIM_CNT(TIM4);
-    while (TIM_CNT(TIM4) >= t) // Wait for timer to roll
+    while (TIM_CNT(TIM4) <= t) // Wait for timer to roll/update
         t = TIM_CNT(TIM4);
     timer_disable_counter(TIM3);
     timer_disable_counter(TIM4);
-    TIM_CNT(TIM3) = 0;
-    TIM_CNT(TIM4) = 0;
+    // TIM_CNT(TIM3) = 0;
+    // TIM_CNT(TIM4) = 0;
     cm_enable_interrupts();
 }
 
@@ -78,11 +87,12 @@ void adc_dac_timer_adjust(uint32_t rate, uint8_t prescaler)
     cm_disable_interrupts();
     
     uint32_t t = TIM_CNT(TIM4);
-    while (TIM_CNT(TIM4) >= t) // Wait for timer to roll
+    while (TIM_CNT(TIM4) >= t)
         t = TIM_CNT(TIM4);
     timer_set_prescaler(TIM4, prescaler);
     timer_set_period(TIM4, arr);
     timer_set_prescaler(TIM3, prescaler);
     timer_set_period(TIM3, arr);
+    timer_set_oc_value(TIM3, TIM_OC4, arr / 2); // Tune ADC timing here
     cm_enable_interrupts();
 }

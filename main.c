@@ -114,6 +114,7 @@ int main(void)
     {
         CMD_IDLE,
         CMD_FREQ,
+        CMD_CTRL,
         CMD_CAPT
     } cmd_state = CMD_IDLE;
 
@@ -169,6 +170,7 @@ int main(void)
                         uint8_t header[4] = {0x55,0x55,0x55,0x00};
                         usbserial_send_tx(header, 4);
                         usbserial_send_tx((uint8_t *)ddsli_get_capt_adc(), 4 * 4 * HB_LEN);
+                        // usbserial_flush_rx();
                     }
                     else if (buf[i] == 'D' || buf[i] == 'd')
                     {
@@ -288,21 +290,31 @@ int main(void)
                     else if (buf[i] == 'P' || buf[i] == 'p')
                     {
                         uint32_t dcnt = 0;
-                        ddsli_output_t buf[16];
+                        ddsli_output_t buf;
+                        
+                        uint8_t header[4] = {0x55,0x55,0x55,0x20};
+                        usbserial_send_tx(header, 4);
                         while (dcnt < 16)
                         {
-                            if (ddsli_output_pop(&buf[dcnt]))
+                            while (ddsli_output_pop(&buf))
+                            {
+                                if(dcnt)
+                                {
+                                    uint8_t sepchar = 0x77;
+                                    usbserial_send_tx(&sepchar, 1);
+                                }
+                                usbserial_send_tx((uint8_t *)&buf, sizeof(buf));
                                 dcnt++;
+                                if(dcnt >= 64) break;
+                            }
+                            uint8_t sepchar = 0xAA;
+                            usbserial_send_tx(&sepchar, 1);
                         }
-                        usbserial_send_tx((uint8_t *)buf, sizeof(buf));
+                        // usbserial_flush_rx();
                     }
-                    else if (buf[i] == 'S' || buf[i] == 's')
+                    else if (buf[i] == 'C' || buf[i] == 'c')
                     {
-                        // adc_dac_timer_stop();
-                    }
-                    else if (buf[i] == 'R' || buf[i] == 'r')
-                    {
-                        // adc_dac_timer_start();
+                        cmd_state = CMD_CTRL;
                     }
                     else
                     {
@@ -315,6 +327,17 @@ int main(void)
                     cmd_state = CMD_IDLE;
                     cmd_value = 0;
                     cmd_digits = 0;
+                    break;
+                case CMD_CTRL:
+                    if (buf[i] == 'S' || buf[i] == 's')
+                    {
+                        adc_dac_timer_stop();
+                    }
+                    else if (buf[i] == 'R' || buf[i] == 'r')
+                    {
+                        adc_dac_timer_restart();
+                    }
+                    cmd_state = CMD_IDLE;
                     break;
 
                 case CMD_CAPT: // Non-numeric char received after "M/m"

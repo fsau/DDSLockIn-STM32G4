@@ -1,11 +1,11 @@
 #include <stdlib.h>
-// #include <string.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/crs.h>
 #include <libopencm3/usb/usbd.h>
 #include <libopencm3/usb/cdc.h>
 #include <libopencm3/cm3/nvic.h>
+#include <libopencm3/cm3/cortex.h>
 #include "usbserial.h"
 #include "utils.h"
 
@@ -196,8 +196,8 @@ static enum usbd_request_return_codes cdcacm_control_request(usbd_device *usbd_d
     return USBD_REQ_NOTSUPP;
 }
 
-#define disable_irq() __asm__("cpsid i")
-#define enable_irq() __asm__("cpsie i")
+#define disable_irq() cm_disable_interrupts();
+#define enable_irq() cm_enable_interrupts();
 #define set_msp(addr) __asm__("msr msp, %0" : : "r"(addr))
 
 /* Reset STM32G4 clocks to default (HSI16, PLL off) */
@@ -327,6 +327,7 @@ void usbserial_send_tx(uint8_t *data, uint32_t len)
         if (!tx_busy)
         {
             tx_busy = 1;
+            enable_irq();
             cdcacm_data_tx_cb(usbd_dev, 0x82);
         }
         enable_irq();
