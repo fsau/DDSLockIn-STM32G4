@@ -49,121 +49,9 @@ void systick_setup(uint32_t sysclk_hz);
 void delay_ms(uint32_t ms);
 void bp_here(void);
 void jump_to_dfu(void);
-
-void print_out_packet(void)
-{
-    uint32_t dcnt = 0;
-    ddsli_output_t obuf;
-    uint8_t header[4] = {0x55,0x55,0x55,0x20};
-    usbserial_send_tx(header, 4);
-
-    while (dcnt < 16)
-    {
-        while (ddsli_output_pop(&obuf))
-        {
-            if (dcnt) {
-                uint8_t sep = 0x77;
-                usbserial_send_tx(&sep, 1);
-            }
-            usbserial_send_tx(
-                (uint8_t *)&obuf, sizeof(obuf));
-            dcnt++;
-            if (dcnt >= 64) break;
-        }
-    }
-    uint8_t sep = 0xAA;
-    usbserial_send_tx(&sep, 1);
-}
-
-void print_legible_demod(void)
-{
-    float acc_ch0_cos = 0;
-    float acc_ch0_sin = 0;
-    float acc_ch1_cos = 0;
-    float acc_ch1_sin = 0;
-    uint64_t acc_f = 0;
-    int32_t n = 0;
-    while (n <= 50)
-    {
-        ddsli_output_t output;
-        if (ddsli_output_pop(&output))
-        {
-            acc_ch0_cos += output.chA[0];
-            acc_ch0_sin += output.chA[1];
-            acc_ch1_cos += output.chB[0];
-            acc_ch1_sin += output.chB[1];
-            acc_f += output.frequency.phase_inc >> 30;
-            n++;
-        }
-    }
-
-    acc_ch0_cos /= n;
-    acc_ch0_sin /= n;
-    acc_ch1_cos /= n;
-    acc_ch1_sin /= n;
-    acc_f /= 4 * n;
-
-    {
-        uint8_t outbuf[128];
-        char *p = (char *)outbuf;
-
-        float f = (float)acc_f / 4294.96f;
-        float amp0 = sqrtf(acc_ch0_cos * acc_ch0_cos +
-                        acc_ch0_sin * acc_ch0_sin);
-        float amp1 = sqrtf(acc_ch1_cos * acc_ch1_cos +
-                        acc_ch1_sin * acc_ch1_sin);
-        float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
-        float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
-        float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
-        float dphi = phi0 - phi1;
-
-        if (dphi > M_PI)  dphi -= 2.0f * M_PI;
-        if (dphi < -M_PI) dphi += 2.0f * M_PI;
-
-        *p++ = 'f'; *p++ = ' ';
-        p = fmt_f(p, f, 0, 3);
-        *p++ = ' '; *p++ = 'H'; *p++ = 'z';
-
-        *p++ = ' '; *p++ = '|'; *p++ = ' ';
-        *p++ = 'C'; *p++ = 'H'; *p++ = '0'; *p++ = ' ';
-        p = fmt_f(p, amp0 / 3510.571f, 6, 5);
-        *p++ = ' '; *p++ = 'V'; *p++ = ' ';
-        p = fmt_f(p, phi0 * (180.0f / M_PI), 4, 3);
-        *p++ = 0xC2; *p++ = 0xB0;
-
-        *p++ = ' '; *p++ = '|'; *p++ = ' ';
-        *p++ = 'C'; *p++ = 'H'; *p++ = '1'; *p++ = ' ';
-        p = fmt_f(p, amp1 / 3510.571f, 6, 5);
-        *p++ = ' '; *p++ = 'V'; *p++ = ' ';
-        p = fmt_f(p, phi1 * (180.0f / M_PI), 4, 3);
-        *p++ = 0xC2; *p++ = 0xB0;
-
-        *p++ = ' '; *p++ = '|'; *p++ = ' ';
-        *p++ = 'r'; *p++ = 'e'; *p++ = 'l'; *p++ = ' ';
-        p = fmt_f(p, amp_ratio, 7, 5);
-        *p++ = ' ';
-        p = fmt_f(p, dphi * (180.0f / M_PI), 7, 3);
-        *p++ = 0xC2; *p++ = 0xB0;
-
-        *p++ = '\r'; *p++ = '\n';
-
-        usbserial_send_tx(outbuf, p - (char *)outbuf);
-    }
-}
-
-void capture_and_print_buff(void)
-{
-    ddsli_capture_buffers(4);
-    while (!ddsli_capture_ready())
-        __asm__("nop");
-    {
-        uint8_t header[4] = {0x55,0x55,0x55,0x00};
-        usbserial_send_tx(header, 4);
-        usbserial_send_tx(
-            (uint8_t *)ddsli_get_capt_adc(),
-            4 * 4 * HB_LEN);
-    }
-}
+void print_out_packet(void);
+void print_legible_demod(void);
+void capture_and_print_buff(void);
 
 volatile uint32_t clock_ticks = 0;
 uint32_t lasttick = 0;
@@ -200,18 +88,6 @@ int main(void)
 
     cm_enable_interrupts();
     adc_dac_timer_start();
-
-    // Command parsing states
-    enum
-    {
-        CMD_IDLE,
-        CMD_FREQ,
-        CMD_CTRL,
-        CMD_CAPT
-    } cmd_state = CMD_IDLE;
-
-    uint32_t cmd_value = 0;
-    uint8_t cmd_digits = 0;
 
     while (clock_ticks < 300)
         __asm__("nop");
@@ -261,8 +137,10 @@ int main(void)
 
             case CMD_ACT_TOGGLE_AUTOCAP:
                 auto_capture = !auto_capture;
+                break;
             case CMD_ACT_TOGGLE_AUTOOUT:
                 auto_output = !auto_output;
+                break;
             default:
                 break;
             }
@@ -409,4 +287,119 @@ cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint32_t *arg)
     }
 
     return CMD_ACT_NONE;
+}
+
+void print_out_packet(void)
+{
+    uint32_t dcnt = 0;
+    ddsli_output_t obuf;
+    uint8_t header[4] = {0x55,0x55,0x55,0x20};
+    usbserial_send_tx(header, 4);
+
+    while (dcnt < 16)
+    {
+        while (ddsli_output_pop(&obuf))
+        {
+            if (dcnt) {
+                uint8_t sep = 0x77;
+                usbserial_send_tx(&sep, 1);
+            }
+            usbserial_send_tx(
+                (uint8_t *)&obuf, sizeof(obuf));
+            dcnt++;
+            if (dcnt >= 64) break;
+        }
+    }
+    uint8_t sep = 0xAA;
+    usbserial_send_tx(&sep, 1);
+}
+
+void print_legible_demod(void)
+{
+    float acc_ch0_cos = 0;
+    float acc_ch0_sin = 0;
+    float acc_ch1_cos = 0;
+    float acc_ch1_sin = 0;
+    uint64_t acc_f = 0;
+    int32_t n = 0;
+    while (n <= 50)
+    {
+        ddsli_output_t output;
+        if (ddsli_output_pop(&output))
+        {
+            acc_ch0_cos += output.chA[0];
+            acc_ch0_sin += output.chA[1];
+            acc_ch1_cos += output.chB[0];
+            acc_ch1_sin += output.chB[1];
+            acc_f += output.frequency.phase_inc >> 30;
+            n++;
+        }
+    }
+
+    acc_ch0_cos /= n;
+    acc_ch0_sin /= n;
+    acc_ch1_cos /= n;
+    acc_ch1_sin /= n;
+    acc_f /= 4 * n;
+
+    {
+        uint8_t outbuf[128];
+        char *p = (char *)outbuf;
+
+        float f = (float)acc_f / 4294.96f;
+        float amp0 = sqrtf(acc_ch0_cos * acc_ch0_cos +
+                        acc_ch0_sin * acc_ch0_sin);
+        float amp1 = sqrtf(acc_ch1_cos * acc_ch1_cos +
+                        acc_ch1_sin * acc_ch1_sin);
+        float phi0 = atan2f(acc_ch0_cos, acc_ch0_sin);
+        float phi1 = atan2f(acc_ch1_cos, acc_ch1_sin);
+        float amp_ratio = (amp0 != 0.0f) ? (amp1 / amp0) : 0.0f;
+        float dphi = phi0 - phi1;
+
+        if (dphi > M_PI)  dphi -= 2.0f * M_PI;
+        if (dphi < -M_PI) dphi += 2.0f * M_PI;
+
+        *p++ = 'f'; *p++ = ' ';
+        p = fmt_f(p, f, 0, 3);
+        *p++ = ' '; *p++ = 'H'; *p++ = 'z';
+
+        *p++ = ' '; *p++ = '|'; *p++ = ' ';
+        *p++ = 'C'; *p++ = 'H'; *p++ = '0'; *p++ = ' ';
+        p = fmt_f(p, amp0 / 3510.571f, 6, 5);
+        *p++ = ' '; *p++ = 'V'; *p++ = ' ';
+        p = fmt_f(p, phi0 * (180.0f / M_PI), 4, 3);
+        *p++ = 0xC2; *p++ = 0xB0;
+
+        *p++ = ' '; *p++ = '|'; *p++ = ' ';
+        *p++ = 'C'; *p++ = 'H'; *p++ = '1'; *p++ = ' ';
+        p = fmt_f(p, amp1 / 3510.571f, 6, 5);
+        *p++ = ' '; *p++ = 'V'; *p++ = ' ';
+        p = fmt_f(p, phi1 * (180.0f / M_PI), 4, 3);
+        *p++ = 0xC2; *p++ = 0xB0;
+
+        *p++ = ' '; *p++ = '|'; *p++ = ' ';
+        *p++ = 'r'; *p++ = 'e'; *p++ = 'l'; *p++ = ' ';
+        p = fmt_f(p, amp_ratio, 7, 5);
+        *p++ = ' ';
+        p = fmt_f(p, dphi * (180.0f / M_PI), 7, 3);
+        *p++ = 0xC2; *p++ = 0xB0;
+
+        *p++ = '\r'; *p++ = '\n';
+
+        usbserial_send_tx(outbuf, p - (char *)outbuf);
+    }
+}
+
+void capture_and_print_buff(void)
+{
+    ddsli_capture_buffers(4);
+    while (!ddsli_capture_ready())
+        __asm__("nop");
+    {
+        uint8_t header[4] = {0x55,0x55,0x55,0x00};
+        usbserial_send_tx(header, 4);
+        usbserial_send_tx(
+            (uint8_t *)ddsli_get_capt_adc(),
+            4 * 4 * HB_LEN);
+    }
 }
