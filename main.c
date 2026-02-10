@@ -166,6 +166,7 @@ int main(void)
                         ddsli_capture_buffers(4);
                         while (!ddsli_capture_ready())
                             __asm__("nop");
+                        usbserial_send_tx(&(uint8_t){0x55,0x55,0x55,0x00}, 4);
                         usbserial_send_tx((uint8_t *)ddsli_get_capt_adc(), 4 * 4 * HB_LEN);
                     }
                     else if (buf[i] == 'D' || buf[i] == 'd')

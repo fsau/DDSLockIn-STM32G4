@@ -1,7 +1,7 @@
 /*
  * DDS + Lock-In Demodulator
  *
- * Streaming DDS signal generator with synchronous demodulation.
+ * DDS signal generator with synchronous demodulation.
  * Continuous processing using circular buffers split into halves.
  * ADC and DAC buffers run via DMA, CPU processes completed half-buffers
  * using ISR/flags for signalling. CODIC used for calculating sine/cosine
@@ -14,14 +14,14 @@
 
    - Add demods with residuals/harmonics (1 or per basis?) and overload detection
    - Fix half-buffer flags & DMA interrupts: flags for every buffer piece
-       - Actually not sure if that will be useful, maybe only some checks once
+       - Actually not sure if that would be useful, maybe only some checks once
          in a while?
          - Check buffer ISR counters & DMA data remaining counter
          - What action to take if they're not in sync?
             - Priority should be running the DDS/DAC continuously
             - Needs function to reset ADC (including its DMA) and trigger/enable
-              it on the right moment
-              - Add "dirty ADC buffer" flag for ignoring bad samples
+              it on the right moment (maybe preload timer and start on DAC interrupt?)
+              - Also add "dirty ADC buffer" flag for ignoring bad samples
    - Single phase half-buffer: less memory, just trigger cordic afterwards?
        - Cordic while demod is fast enough? So we don't have to wait CORDIC finish
        - Bad: cant CORDIC while calculating next phases (but can do while demod)
@@ -31,8 +31,8 @@
    - Smooth/piecewise continuous amplitude control
    - LSR with int32/64 instead of floats? Not sure if better/faster
    - Adjust DDS/DAC/ADC/demux instances on the fly (currently hardcoded)
-       - Set function pointer to each step and put #defines to global vars
-       - Put global vars in a instance struct?
+       - Set function pointer to each step and transfer #defines to vars
+       - Put global vars in a singele struct? (per instance)
 */
 
 #include "ddsli.h"
@@ -245,8 +245,8 @@ void ddsli_set_frequency_dual(float f, float fb, float sweep, float sweepb, floa
 // Vector Linear Combination: A*sin + B*cos → DAC
 // -----------------------------------------------------------------------------
 
-// Process half-buffer: A*sin → DAC samples
-// Called after CORDIC completes
+// Process half-buffer for single DDS, quadrature output (90°)
+// A1*sin → DAC CH1, A2*cos → DAC CH2
 static inline void ddsli_process_dac_single90deg(
     volatile cordic_out_sample_t *sincos_src,
     volatile dual_adc_sample_t *dac_dest,
@@ -273,8 +273,8 @@ static inline void ddsli_process_dac_single90deg(
     }
 }
 
-// Process half-buffer: A*sin → DAC samples
-// Called after CORDIC completes
+// Process half-buffer for double DDS
+// A1*sin1 → DAC CH1, A2*sin2 → DAC CH2
 static inline void ddsli_process_dac_double(
     volatile cordic_out_sample_t *sincos_src,
     volatile dual_adc_sample_t *dac_dest,
@@ -301,6 +301,7 @@ static inline void ddsli_process_dac_double(
     }
 }
 
+// Simple copy for dual DDS
 static inline void ddsli_process_dac_copy_double(
     volatile cordic_out_sample_t *sincos_src,
     volatile dual_adc_sample_t *dac_dest,
@@ -317,7 +318,7 @@ static inline void ddsli_process_dac_copy_double(
     }
 }
 
-// Simple copy
+// Simple copy using DMA (quadrature output)
 static inline void ddsli_process_dac_copy_single90deg(
     volatile cordic_out_sample_t *sincos_src,
     volatile dual_adc_sample_t *dac_dest,
@@ -328,6 +329,7 @@ static inline void ddsli_process_dac_copy_single90deg(
 }
 
 // Convenience wrapper for half-buffer processing
+// Called after CORDIC completes
 static inline void ddsli_process_dac_halfbuffer(uint32_t dac_half_idx,
                                                 uint32_t sincos_half_idx)
 {
@@ -380,7 +382,6 @@ static inline ddsli_output_t ddsli_mix_adc_sincos(
 }
 
 // Least squares regression with 2 components + DC using floats.
-// Currently returns the fitted values.
 static inline ddsli_output_t ddsli_lsr_adc_sincos(
     volatile dual_adc_sample_t *adc_src,
     volatile cordic_out_sample_t *sincos_src,
@@ -525,11 +526,25 @@ static inline void ddsli_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sinc
 // CORDIC Control
 // -----------------------------------------------------------------------------
 
+static inline void ddsli_codic_halfbuffer_single(uint32_t buffer_half_idx, uint32_t sincos_offset)
+{
+    cm_disable_interrupts();
+    volatile cordic_in_phase_t *src = &phase_buf[((buffer_half_idx) % 2) * HB_LEN];
+    volatile cordic_out_sample_t *dst = &sincos_buf[((sincos_offset) % SINCOS_BUFF_HALVES) * HB_LEN];
+
+    sincos_buf_phase[sincos_offset % SINCOS_BUFF_HALVES] = phase_buf_phase[buffer_half_idx % 2];
+
+    cordic_start_dma((volatile uint32_t *)src,
+                     (volatile uint32_t *)dst,
+                     HB_LEN);
+    cm_enable_interrupts();
+}
+
 cordic_in_phase_t *cordic_next_src = NULL;
 cordic_out_sample_t *cordic_next_dst = NULL;
 uint16_t cordic_next_size = 0;
 
-static inline void ddsli_codic_halfbuffer(uint32_t buffer_half_idx, uint32_t sincos_offset)
+static inline void ddsli_codic_halfbuffer_double(uint32_t buffer_half_idx, uint32_t sincos_offset)
 {
     cm_disable_interrupts();
     volatile cordic_in_phase_t *src = &phase_buf[((buffer_half_idx) % 2) * HB_LEN];
@@ -626,14 +641,14 @@ void ddsli_setup(void)
 
     ddsli_current_half = 0;
 
-    ddsli_codic_halfbuffer(0, 0);
+    ddsli_codic_halfbuffer_double(0, 0);
     // Blocking wait for CORDIC completion only
     while (*cordic_busy_flag_ptr)
     {
         __asm__("nop");
     }
 
-    ddsli_codic_halfbuffer(1, 1);
+    ddsli_codic_halfbuffer_double(1, 1);
     ddsli_generate_phase_halfbuffer_idx(0);
     while (*cordic_busy_flag_ptr)
     {
@@ -707,10 +722,14 @@ int8_t ddsli_step(void)
             ddsli_process_dac_halfbuffer(buffers_half, sincos_thirds);
             cm_disable_interrupts();
             ddsli_current_half = (ddsli_current_half + 1) % (2 * SINCOS_BUFF_HALVES);
+            cm_enable_interrupts();
+            return 2;
         }
-
-        cm_enable_interrupts();
-        return 2;
+        else
+        {
+            cm_enable_interrupts();
+            return 1;
+        }
     }
     else if (*dac_half_flag_ptr)
     {
@@ -733,7 +752,7 @@ int8_t ddsli_step(void)
 
     cm_enable_interrupts();
 
-    ddsli_codic_halfbuffer(buffers_half, sincos_thirds);
+    ddsli_codic_halfbuffer_double(buffers_half, sincos_thirds);
     ddsli_generate_phase_halfbuffer_idx(!buffers_half);
 
     cm_disable_interrupts();

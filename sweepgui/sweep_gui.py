@@ -27,7 +27,6 @@ class SweepGUI(QMainWindow):
         self.impedance_calculator = None
         self.csv_saver = None
         
-        # NEW: Track if we need to insert nan for new sweep in hold mode
         self.insert_nan_next_point = False
         
         # NEW: Amplitude control state
@@ -46,7 +45,7 @@ class SweepGUI(QMainWindow):
         
         # Generate initial filename
         self.generate_new_filename()
-    
+        
     def setup_ui(self):
         """Setup the user interface"""
         central = QWidget()
