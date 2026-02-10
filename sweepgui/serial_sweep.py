@@ -26,7 +26,7 @@ class SerialSweep(QObject):
         
         # Communication settings
         self.baudrate = 115200
-        self.read_timeout = 1.0  # 1 second timeout for reads
+        self.read_timeout = 2.0  # 2 second timeout for reads
         self.write_timeout = 0.5  # 0.5 second timeout for writes
         self.command_retry_count = 2
         
@@ -34,6 +34,10 @@ class SerialSweep(QObject):
         self.receive_fifo = queue.Queue(maxsize=10000)  # 10KB buffer
         self.receive_thread = None
         self.receive_thread_running = False
+        
+        # Measurement parameters
+        self.MEASUREMENT_HEADER = bytes([0x55, 0x55, 0x55, 0x00])
+        self.MEASUREMENT_DATA_SIZE = 1024 * 4  # 4096 bytes of actual ADC data
         
         # State variables (compatible with original)
         self.fw = 0
@@ -280,6 +284,8 @@ class SerialSweep(QObject):
             if not self.sweep_started and not self.waiting_for_start:
                 return False, None, "Sweep stopped"
             
+            print(f"Sending command: {command_bytes} (attempt {attempt+1})")
+            
             success, result, error = self._safe_serial_operation(
                 self._raw_send_command,
                 command_bytes,
@@ -291,6 +297,7 @@ class SerialSweep(QObject):
                 return True, result, None
             
             if attempt < self.command_retry_count:
+                print(f"Command failed, retrying...: {error}")
                 time.sleep(0.1 * (attempt + 1))
         
         return False, None, error or "Command failed after retries"
@@ -310,33 +317,86 @@ class SerialSweep(QObject):
         # Wait for response if needed
         if expect_response and response_size:
             # For measurement command, read directly from serial port
-            # (Simpler and more reliable than trying to parse from FIFO)
-            return self._read_measurement_directly(response_size)
+            if command_bytes == b'm':
+                return self._read_measurement_directly()
+            else:
+                # For other commands, try to read from FIFO
+                success, data, error = self._read_from_fifo(response_size)
+                if not success:
+                    raise serial.SerialTimeoutException(error)
+                return data
         
         return None
     
-    def _read_measurement_directly(self, size):
-        """Read measurement data directly from serial port"""
-        # Clear FIFO before measurement
+    def _read_measurement_directly(self):
+        """Read measurement data directly from serial port, skipping header"""
+        # Clear FIFO before measurement to ensure clean data
         self._clear_fifo()
         
         # Read directly from serial port
         data = bytearray()
         start_time = time.time()
+        total_bytes_needed = len(self.MEASUREMENT_HEADER) + self.MEASUREMENT_DATA_SIZE
         
-        while len(data) < size:
+        print(f"Reading measurement data directly from serial port...")
+        print(f"Expecting {total_bytes_needed} total bytes ({len(self.MEASUREMENT_HEADER)} header + {self.MEASUREMENT_DATA_SIZE} data)")
+        
+        # Read the full response (header + data)
+        while len(data) < total_bytes_needed:
             if time.time() - start_time > self.read_timeout:
-                raise serial.SerialTimeoutException(f"Measurement read timeout after {self.read_timeout} seconds")
+                raise serial.SerialTimeoutException(
+                    f"Measurement read timeout after {self.read_timeout} seconds. "
+                    f"Got {len(data)}/{total_bytes_needed} bytes"
+                )
             
-            bytes_to_read = size - len(data)
+            bytes_to_read = total_bytes_needed - len(data)
             chunk = self.ser.read(min(bytes_to_read, self.ser.in_waiting or 1))
             
             if chunk:
                 data.extend(chunk)
+                # Progress indicator
+                if len(data) % 1000 == 0 or len(data) >= total_bytes_needed:
+                    print(f"  Read {len(data)}/{total_bytes_needed} bytes")
             else:
                 time.sleep(0.001)
         
-        return bytes(data)
+        print(f"Successfully read {len(data)} bytes total")
+        
+        # Verify header
+        header = data[:len(self.MEASUREMENT_HEADER)]
+        if header != self.MEASUREMENT_HEADER:
+            print(f"Warning: Unexpected header: {header.hex()}")
+            # Try to find the header in the data
+            header_pos = data.find(self.MEASUREMENT_HEADER)
+            if header_pos != -1:
+                print(f"Found header at position {header_pos}")
+                # Extract data after header
+                data_start = header_pos + len(self.MEASUREMENT_HEADER)
+                if data_start + self.MEASUREMENT_DATA_SIZE <= len(data):
+                    measurement_data = data[data_start:data_start + self.MEASUREMENT_DATA_SIZE]
+                    print(f"Extracted {len(measurement_data)} bytes of measurement data")
+                    return bytes(measurement_data)
+            
+            # If we can't find the header, just take the last MEASUREMENT_DATA_SIZE bytes
+            print("Header not found, taking last {self.MEASUREMENT_DATA_SIZE} bytes")
+            if len(data) >= self.MEASUREMENT_DATA_SIZE:
+                return bytes(data[-self.MEASUREMENT_DATA_SIZE:])
+            else:
+                raise serial.SerialTimeoutException(
+                    f"Incomplete data: got {len(data)} bytes, expected at least {self.MEASUREMENT_DATA_SIZE}"
+                )
+        
+        # Extract just the measurement data (skip header)
+        measurement_data = data[len(self.MEASUREMENT_HEADER):]
+        
+        if len(measurement_data) != self.MEASUREMENT_DATA_SIZE:
+            raise serial.SerialTimeoutException(
+                f"Incomplete measurement data: got {len(measurement_data)} bytes, "
+                f"expected {self.MEASUREMENT_DATA_SIZE}"
+            )
+        
+        print(f"Successfully extracted {len(measurement_data)} bytes of measurement data (after header)")
+        return bytes(measurement_data)
     
     def _start_command_thread(self):
         """Start background thread for command processing"""
@@ -364,12 +424,13 @@ class SerialSweep(QObject):
                             success, data, error = self._send_command(*args, **kwargs)
                             if callback:
                                 callback(success, data, error)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"Command thread error: {e}")
                 
                 time.sleep(0.001)
                 
-            except Exception:
+            except Exception as e:
+                print(f"Command thread error: {e}")
                 time.sleep(0.1)
     
     def _queue_command(self, command_type, callback, *args, **kwargs):
@@ -444,10 +505,13 @@ class SerialSweep(QObject):
         
         for measurement_idx in range(average_count):
             try:
+                print(f"\n=== Starting measurement {measurement_idx+1}/{average_count} at fw={fw} ===")
+                
                 # Clear FIFO before frequency command
                 self._clear_fifo()
                 
                 # Send frequency command
+                print(f"Sending frequency command: ff{fw}###")
                 success, _, error = self._send_command(f"ff{fw}###")
                 if not success:
                     return None, error
@@ -456,15 +520,22 @@ class SerialSweep(QObject):
                 
                 # Apply sample delay
                 if sample_delay_ms > 0:
+                    print(f"Waiting {sample_delay_ms}ms sample delay...")
                     time.sleep(sample_delay_ms / 1000.0)
                 
                 # Get measurement data
-                success, raw, error = self._send_command(b"m", expect_response=True, response_size=1024*4)
+                print("Sending measurement command 'm'...")
+                success, raw, error = self._send_command(b"m", expect_response=True, response_size=self.MEASUREMENT_DATA_SIZE)
                 if not success:
                     return None, error
                 
-                if len(raw) != 1024 * 4:
-                    return None, f"Short read: {len(raw)} bytes (expected {1024*4})"
+                print(f"Received {len(raw)} bytes of measurement data (after header)")
+                
+                if len(raw) != self.MEASUREMENT_DATA_SIZE:
+                    return None, f"Short read: {len(raw)} bytes (expected {self.MEASUREMENT_DATA_SIZE})"
+                
+                # Show first few bytes for debugging
+                print(f"First 20 bytes of measurement data: {raw[:20].hex()}")
                 
                 # Process data
                 raw_u32 = np.frombuffer(raw, dtype=np.uint32)
@@ -490,9 +561,13 @@ class SerialSweep(QObject):
                 }
                 freq_detailed_data.append(measurement_data)
                 
+                print(f"Successfully processed measurement {measurement_idx+1}")
+                
             except Exception as e:
+                print(f"Measurement error: {str(e)}")
                 return None, f"Measurement error: {str(e)}"
         
+        print(f"=== Completed {average_count} measurements ===")
         return freq_detailed_data, None
     
     def perform_measurement_async(self, fw, amplitude=0, average_count=1, sample_delay_ms=0, callback=None):
