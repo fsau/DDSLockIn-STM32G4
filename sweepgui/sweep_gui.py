@@ -1,8 +1,3 @@
-"""
-Main GUI window for the Impedance Analyzer application.
-Contains all UI components and business logic.
-"""
-
 import numpy as np
 from PyQt5.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QFormLayout, QApplication
 from PyQt5.QtWidgets import QSpinBox, QDoubleSpinBox, QPushButton, QTextEdit, QLineEdit, QLabel, QCheckBox
@@ -659,40 +654,6 @@ class SweepGUI(QMainWindow):
         if self.auto_amplitude_checkbox.isChecked():
             amplitude = self.last_amplitude
         
-        # # NEW: If auto delay is enabled, we need to override the normal sweep step
-        # if self.auto_delay_checkbox.isChecked():
-        #     if not self.serial_sweep.sweep_started or self.serial_sweep.waiting_for_start:
-        #         return
-            
-        #     if self.serial_sweep.fw > self.serial_sweep.fw_end:
-        #         self.serial_sweep.sweep_started = False
-        #         if self.serial_sweep.on_sweep_complete:
-        #             self.serial_sweep.on_sweep_complete()
-        #         return
-            
-        #     # Perform measurement with auto delay
-        #     measurements, error = self.perform_measurement_with_auto_delay(
-        #         self.serial_sweep.fw, amplitude, average_count
-        #     )
-            
-        #     if error:
-        #         self.serial_sweep.sweep_started = False
-        #         self.timer.stop()
-        #         self.status.setText(error)
-        #         return
-            
-        #     # Call sweep step callback
-        #     if self.serial_sweep.on_sweep_step:
-        #         result = self.serial_sweep.on_sweep_step(measurements, self.serial_sweep.fw)
-        #         if result:
-        #             # Only store detailed data for CSV
-        #             self.serial_sweep.detailed_data.append(result['detailed_data'])
-            
-        #     # Increment frequency
-        #     self.serial_sweep.fw += delta_fw
-        # else:
-
-        # Original sweep step logic
         continue_sweep, error = self.serial_sweep.sweep_step(
             delta_fw, amplitude, average_count, sample_delay_ms
         )

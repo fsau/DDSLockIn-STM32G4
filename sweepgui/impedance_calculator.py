@@ -98,3 +98,32 @@ class ImpedanceCalculator:
         
         return (Z_mag, Z_phase, voltage_phase, rms_residuals_ch0, rms_residuals_ch1, 
                 C_v, C_i, A_v, B_v, A_i, B_i, V_complex, I_complex)
+
+    def calculate_impedance_demod(self, chA, chB, freq_hz):
+        """
+        chA, chB: [I, Q, DC] from demod
+        """
+
+        R_ref = self.r_ref * 1e3
+        C_ref = self.c_ref * 1e-12
+        omega = 2 * np.pi * freq_hz
+
+        V = chA[0] + 1j * chA[1]
+        I = chB[0] + 1j * chB[1]
+
+        if abs(I) < 1e-15:
+            return np.nan, np.nan
+
+        Z_ref = R_ref / (1 + 1j * omega * R_ref * C_ref)
+        Z = V / I * Z_ref
+
+        Z_mag = abs(Z)
+        Z_phase = np.angle(Z, deg=True)
+
+        # normalize
+        if Z_phase > 180:
+            Z_phase -= 360
+        if Z_phase < -180:
+            Z_phase += 360
+
+        return Z_mag, Z_phase

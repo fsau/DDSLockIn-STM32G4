@@ -78,3 +78,6 @@ dfu: $(TARGET).bin
 size: $(TARGET).elf
 	$(NM) -S --size-sort --radix=d $<
 	$(SIZE) --format=gnu $<
+
+comm:
+	tio -a latest --log-file /dev/stdout --log-append | perl -we 'binmode(STDIN);binmode(STDOUT);$$|=1;while(read(STDIN,my $$c,1)){my $$o=ord($$c);if(($$o>=0x20&&$$o<=0x7E)||$$o==0x09||$$o==0x0A||$$o==0x0D){print $$c;}else{print "\x1b[91m\x5B";printf "%02X",$$o;print "\x5D\x1b[0m";}}'
