@@ -144,25 +144,24 @@ int main(void)
             default:
                 break;
             }
-
-            if(auto_capture)
+        }
+        if(auto_capture)
+        {
+            static uint32_t last_clock = 0;
+            if(clock_ticks/auto_capture_dly != last_clock)
             {
-                static uint32_t last_clock = 0;
-                if(clock_ticks/auto_capture_dly != last_clock)
-                {
-                    last_clock = clock_ticks/auto_capture_dly;
-
-                }
+                last_clock = clock_ticks/auto_capture_dly;
+                capture_and_print_buff();
             }
+        }
 
-            if(auto_output)
+        if(auto_output)
+        {
+            static uint32_t last_clock = 0;
+            if(clock_ticks/auto_output_dly != last_clock)
             {
-                static uint32_t last_clock = 0;
-                if(clock_ticks/auto_output_dly != last_clock)
-                {
-                    last_clock = clock_ticks/auto_capture_dly;
-
-                }
+                last_clock = clock_ticks/auto_capture_dly;
+                print_out_packet();
             }
         }
     }
@@ -276,6 +275,10 @@ cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint32_t *arg)
             return CMD_ACT_CTRL_STOP;
         if (c == 'R' || c == 'r')
             return CMD_ACT_CTRL_RESTART;
+        if (c == 'M' || c == 'm')
+            return CMD_ACT_TOGGLE_AUTOCAP;
+        if (c == 'P' || c == 'p')
+            return CMD_ACT_TOGGLE_AUTOOUT;
         break;
 
     case CMD_CAPT:
