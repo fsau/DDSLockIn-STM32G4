@@ -7,11 +7,11 @@ NM = $(CROSS_COMPILE)nm
 SIZE = $(CROSS_COMPILE)size
 DEFS ?=
 CPUFLAGS = -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard
-CFLAGS = -Wall -Wextra -g3 -O3 -ffast-math -MD $(CPUFLAGS) -DSTM32G4 -I./libopencm3/include -Imodules $(DEFS)
+CFLAGS = -Wall -Wextra -g3 -O3 -ffast-math -MD $(CPUFLAGS) -DSTM32G4 -I./libopencm3/include -Isrc $(DEFS)
 LDFLAGS = $(CPUFLAGS) -nostartfiles -L./libopencm3/lib -Wl,-T,$(LDSCRIPT) -Wl,-Map,$(TARGET).map -specs=nano.specs -ffast-math
 LDLIBS = -lopencm3_stm32g4 -lc -lnosys -lm
 
-CSRC = $(wildcard modules/*.c) main.c 
+CSRC = $(wildcard src/*.c)
 OBJ = $(patsubst %.c,build/%.o,$(CSRC))
 TARGET = build/main
 LDSCRIPT = blackpill.ld
@@ -20,7 +20,7 @@ all: libopencm3 $(TARGET).bin $(TARGET).dis $(TARGET).sym $(TARGET).size $(TARGE
 
 build:
 	mkdir -p build
-	mkdir -p build/modules
+	mkdir -p build/src
 
 $(TARGET).elf: $(OBJ) $(LDSCRIPT) | build
 	$(CC) $(LDFLAGS) -o $@ $(OBJ) $(LDLIBS)
@@ -79,5 +79,8 @@ size: $(TARGET).elf
 	$(NM) -S --size-sort --radix=d $<
 	$(SIZE) --format=gnu $<
 
-comm:
+commd:
 	tio -a latest --log-file /dev/stdout --log-append | perl -we 'binmode(STDIN);binmode(STDOUT);$$|=1;while(read(STDIN,my $$c,1)){my $$o=ord($$c);if(($$o>=0x20&&$$o<=0x7E)||$$o==0x09||$$o==0x0A||$$o==0x0D){print $$c;}else{print "\x1b[91m\x5B";printf "%02X",$$o;print "\x5D\x1b[0m";}}'
+
+comm:
+	tio -a latest

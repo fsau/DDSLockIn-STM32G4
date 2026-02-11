@@ -26,7 +26,7 @@ typedef enum {
     CMD_ACT_CAPTURE_ONCE,
     CMD_ACT_PRINT_DEMOD,
     CMD_ACT_PRINT_PACKETS,
-    CMD_ACT_SET_AUTOCAP,
+    CMD_ACT_ADJUST_AUTOCAP,
     CMD_ACT_TOGGLE_AUTOCAP,
     CMD_ACT_TOGGLE_AUTOOUT
 } cmd_action_t;
@@ -111,7 +111,7 @@ int main(void)
                                     0.0f, 1000000);
                 break;
 
-            case CMD_ACT_SET_AUTOCAP:
+            case CMD_ACT_ADJUST_AUTOCAP:
                 auto_capture_dly = arg;
                 break;
 
@@ -145,6 +145,7 @@ int main(void)
                 break;
             }
         }
+
         if(auto_capture)
         {
             static uint32_t last_clock = 0;
@@ -225,8 +226,7 @@ void jump_to_dfu(void) // not working very well...
         ;
 }
 
-static cmd_action_t
-cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint32_t *arg)
+static cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint32_t *arg)
 {
     /* Digit accumulation */
     if (c >= '0' && c <= '9' && p->digits < 10) {
@@ -286,7 +286,7 @@ cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint32_t *arg)
         p->state = CMD_IDLE;
         p->value = 0;
         p->digits = 0;
-        return CMD_ACT_SET_AUTOCAP;
+        return CMD_ACT_ADJUST_AUTOCAP;
     }
 
     return CMD_ACT_NONE;
