@@ -3,10 +3,11 @@
 A firmware and toolset for generating and analyzing frequency sweeps on an STM32G431 "blackpill" board using its dual 4MSa/s ADC, DAC etc.
 
 Contents
-- `main.c` — firmware entry point
-- `modules/` — firmware modules (ADC, DAC, SPI, USB serial, utilities)
+- `src/` — Firmware source code (`main.c` plus one `.c/.h` pair per module)
 - `libopencm3/` — libopencm3 firmware library (submodule)
-- `sweepgui/` — Python GUI and helper scripts for running and saving sweeps
+- `sweepgui/` — Python GUI for configuring, running, and saving sweeps
+- `scripts/` — Octave scripts for general control, post-processing, and measurements
+- `docs/` — Reference material (datasheets, manuals, pin configurations, etc.)
 
 Requirements
 - ARM embedded toolchain (e.g. `arm-none-eabi-gcc`)
