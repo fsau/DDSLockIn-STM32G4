@@ -144,25 +144,25 @@ int main(void)
             default:
                 break;
             }
-        }
 
-        if(auto_capture)
-        {
-            static uint32_t last_clock = 0;
-            if(clock_ticks/auto_capture_dly != last_clock)
+            if(auto_capture)
             {
-                last_clock = clock_ticks/auto_capture_dly;
-                capture_and_print_buff();
+                static uint32_t last_clock = 0;
+                if(clock_ticks/auto_capture_dly != last_clock)
+                {
+                    last_clock = clock_ticks/auto_capture_dly;
+                    capture_and_print_buff();
+                }
             }
-        }
 
-        if(auto_output)
-        {
-            static uint32_t last_clock = 0;
-            if(clock_ticks/auto_output_dly != last_clock)
+            if(auto_output)
             {
-                last_clock = clock_ticks/auto_capture_dly;
-                print_out_packet();
+                static uint32_t last_clock = 0;
+                if(clock_ticks/auto_output_dly != last_clock)
+                {
+                    last_clock = clock_ticks/auto_capture_dly;
+                    print_out_packet();
+                }
             }
         }
     }
