@@ -7,6 +7,180 @@
  * using ISR/flags for signalling. CODIC used for calculating sine/cosine
  * in real-time.
  * The step function can be called on main or on a low priority ISR.
+ *
+ * ---------------------------------------------
+ * Internal architecture overview
+ * ---------------------------------------------
+ *
+ * This module implements a pipelined DDS + digital lock-in using
+ * double-buffered phase, sin/cos, DAC and ADC paths. The design
+ * overlaps CPU, CORDIC, DMA, DAC and ADC activity to achieve
+ * continuous operation with deterministic latency.
+ * 
+ * ================================================================
+ * 1) Buffers and definitions
+ * ================================================================
+ *
+ * The following buffers are used internally. All buffers are split
+ * into half-buffers of length HB_LEN and advanced in a pipelined
+ * manner.
+ *
+ * Capture buffers (debug / acquisition mode):
+ *
+ *  - adc_captbuf[CAPT_BUFF_HALVES * HB_LEN]
+ *        Captured ADC samples (dual ADC packed format).
+ *
+ *  - sincos_captbuf[CAPT_BUFF_HALVES * HB_LEN]
+ *        Captured reference sin/cos samples corresponding to ADC.
+ *
+ *  - phase_captbuf[CAPT_BUFF_HALVES]
+ *        Phase state associated with each captured half-buffer.
+ *
+ * DDS generation buffers:
+ *
+ *  - phase_buf[2 * HB_LEN * DDS_GEN_INSTANCES]
+ *        Phase samples fed to the CORDIC.
+ *        Double-buffered, packed by DDS instance using a fixed offset.
+ *
+ *  - phase_buf_phase[2 * DDS_GEN_INSTANCES]
+ *        Phase accumulator state associated with each phase half-buffer.
+ *
+ *  - sincos_buf[SINCOS_BUFF_HALVES * HB_LEN * DDS_GEN_INSTANCES]
+ *        Sin/Cos output from the CORDIC.
+ *        Three half-buffers are maintained to satisfy pipeline latency:
+ *          - past    : used for lock-in demodulation
+ *          - current : in-flight (unused)
+ *          - future  : used for DAC synthesis
+ *
+ *  - sincos_buf_phase[SINCOS_BUFF_HALVES * DDS_GEN_INSTANCES]
+ *        Phase state associated with each sincos half-buffer.
+ *
+ * DAC / ADC streaming buffers:
+ *
+ *  - dac_buf[2 * HB_LEN]
+ *        DAC output samples (dual-channel packed format).
+ *        Double-buffered.
+ *
+ *  - adc_buf[2 * HB_LEN]
+ *        ADC input samples (dual-channel packed format).
+ *        Double-buffered.
+ *
+ * Lock-in output FIFO:
+ *
+ *  - lpf_fifo[LPF_FIFO_LEN]
+ *        FIFO of demodulated output samples produced by the CPU.
+ *
+ * Relevant compile-time definitions:
+ *
+ *  - HB_LEN              : samples per half-buffer
+ *  - CAPT_BUFF_HALVES    : number of capture half-buffers
+ *  - SINCOS_BUFF_HALVES  : number of sincos pipeline half-buffers (3)
+ *  - DDS_GEN_INSTANCES   : number of DDS generators (currently 2)
+ *  - LPF_FIFO_LEN        : demodulated output FIFO depth
+ *
+ * Notes:
+ *  - Multiple DDS generators are implemented by packing buffers
+ *    contiguously; buffer size is multiplied by DDS_GEN_INSTANCES
+ *    and accessed using a fixed per-instance offset.
+ *  - ADC and DAC buffers are single-instance; channel separation
+ *    is resolved during synthesis and demodulation.
+ *
+ *
+ * ================================================================
+ * 2) Data path (single DDS)
+ * ================================================================
+ *
+ * Nominal signal flow (operations are in []):
+ *
+ *   [CPU phase accumulator]
+ *        -> phase_buf
+ *        -> [CORDIC]
+ *        -> sincos_buf
+ *        -> [CPU LC or DMA memcpy]
+ *        -> dac_buf
+ *        -> [DAC]
+ *
+ * In parallel:
+ *                       sincos_buf 
+ *                            |
+ *                            v
+ *    [ADC] -> adc_buf -> [CPU demux] -> out_fifo
+ *
+ * ================================================================
+ * 3) Temporal pipeline
+ * ================================================================
+ *
+ * Each logical "step" corresponds to one half-buffer duration
+ * (DDS_BUF_LEN samples). Buffers overlap as follows:
+ *
+ * |    t = n-1    |  t = n (now)  |    t = n+1    |   t = n+2    |
+ * |---------------|---------------|---------------|--------------|
+ * |               |               | phase_buf[1]  | phase_buf[0] |
+ * | sincos_buf[0] | sincos_buf[1] | sincos_buf[3] |              |
+ * |               |  dac_buf[0]   |  dac_buf[1]   |              |
+ * |  adc_buf[0]   |  adc_buf[1]   |               |              |
+ * |  <--out_fifo  |               |               |              |
+ *
+ * Buffer index toggles every half-buffer interrupt.
+ *
+ * ================================================================
+ * 4) Per-step operations
+ * ================================================================
+ *
+ * For each half-buffer transition (ping-pong step n):
+ *
+ *  1) CPU phase generation (2 steps ahead):
+ *        phase[(n+2)%2] = phase_accumulator(frequency, phase_inc)
+ *
+ *  2) CORDIC processing (1 step ahead):
+ *        sincos[(n+1)%3] = CORDIC(phase[(n+1)%2])
+ *
+ *  3) CPU or DMA DAC preparation (1 step ahead, after CORDIC):
+ *        dac[(n+1)%2] = f(sincos[(n+1)%3])
+ *
+ *  4) Hardware I/O (current step):
+ *        - DAC reads dac[n]
+ *        - ADC writes adc[n]
+ *
+ *  5) CPU lock-in / demodulation (1 step behind):
+ *        out = demod(adc[n-1], sincos[n-1])
+ *        push(out_fifo, out)
+ *
+ * Notes:
+ *  - Three sincos generations are in memory:
+ *        n-1 : used for previous step demodulation
+ *        n   : storage/unused
+ *        n+1 : used for next step DAC generation
+ *
+ * ================================================================
+ * 5) Multiple DDS
+ * ================================================================
+ *
+ * For dual DDS operation:
+ *
+ *  - phase_buf[] and sincos_buf[] are logically independent per DDS
+ *  - Buffers are stored contiguously:
+ *        total buffer size is doubled and a fixed offset is used
+ *        to address the second DDS
+ *  - Each DDS channel applies its own amplitude modulation
+ *  - Demodulation uses the corresponding sin/cos set per channel
+ *
+ * The pipeline timing remains identical; only buffer sizing and
+ * addressing (base + offset) change.
+ *
+ * Note:
+ *  - The DAC generation functions are intentionally simple and can
+ *    be easily adapted for summing, multiplying, or other synthesis
+ *    schemes if required.
+ *
+ * ================================================================
+ * This structure allows:
+ *  - deterministic latency
+ *  - zero gaps in DAC/ADC streaming
+ *  - clear separation between operations, each running on its own buffers
+ *
+ * Users may modify buffer sizes, formats, or processing stages
+ * as long as the ping-pong ordering is preserved.
  */
 
 /*
@@ -29,10 +203,32 @@
    - OPA preamp and OPA DAC2 output, allow independent channel selection/switching
    - Calibration routines? Measuring Vref and internally connecting DAC-ADC?
    - Smooth/piecewise continuous amplitude control
-   - LSR with int32/64 instead of floats? Not sure if better/faster
+   - LSR with int32/64 instead of floats? Not sure if better/faster (with FPU)
    - Adjust DDS/DAC/ADC/demux instances on the fly (currently hardcoded)
        - Set function pointer to each step and transfer #defines to vars
        - Put global vars in a singele struct? (per instance)
+        - Options:
+            - General:
+                - Half buffer length
+                - Sample rate
+            - DDS: 
+                - Enable
+                - 1or2 independent frequencies
+                - 1or2 phase_bufs halves (per freq)
+                - 2or3 sincos_bufs halves (per freq, demod requires 3)
+                - Phase method: 64 or 32 bit calc, cordic or CPU/LUT
+            - DAC:
+                - Enable/disable ouput
+                - Skip LC? (use sincos as dac buffer)
+                - Single or double channel?
+                - DAC method: 90deg fix/copy, 90deg x amp[2], 4 params LI, dual
+            - ADC and demod:
+                - Enable/disable capture+demod
+                - Capture buffer max len
+                - Input vs reference channels (if double freq)
+                - Demod method: mix, lsr
+                - Output LPF/decimator
+     - Test running cordic in same place
 */
 
 #include "ddsli.h"
@@ -47,6 +243,7 @@
 #include "adc.h"
 #include "dac.h"
 #include "dma_memcpy.h"
+#include "timers.h"
 #include "utils.h"
 
 // -----------------------------------------------------------------------------
@@ -209,7 +406,7 @@ void ddsli_set_frequency(float f, float sweep, float sample_f)
     }
 }
 
-// Frequency management
+// Frequency management (dual DDS)
 void ddsli_set_frequency_dual(float f, float fb, float sweep, float sweepb, float sample_f)
 {
     volatile ddsli_phase_inc_t phase_inc = (ddsli_phase_inc_t)((f * (1ULL << 32)) / sample_f);
@@ -302,6 +499,7 @@ static inline void ddsli_process_dac_double(
 }
 
 // Simple copy for dual DDS
+// sin1 → DAC CH1, sin2 → DAC CH2
 static inline void ddsli_process_dac_copy_double(
     volatile cordic_out_sample_t *sincos_src,
     volatile dual_adc_sample_t *dac_dest,
@@ -318,7 +516,7 @@ static inline void ddsli_process_dac_copy_double(
     }
 }
 
-// Simple copy using DMA (quadrature output)
+// Simple copy using DMA (quadrature/90° output)
 static inline void ddsli_process_dac_copy_single90deg(
     volatile cordic_out_sample_t *sincos_src,
     volatile dual_adc_sample_t *dac_dest,
@@ -534,10 +732,10 @@ static inline void ddsli_codic_halfbuffer_single(uint32_t buffer_half_idx, uint3
 
     sincos_buf_phase[sincos_offset % SINCOS_BUFF_HALVES] = phase_buf_phase[buffer_half_idx % 2];
 
+    cm_enable_interrupts();
     cordic_start_dma((volatile uint32_t *)src,
                      (volatile uint32_t *)dst,
                      HB_LEN);
-    cm_enable_interrupts();
 }
 
 cordic_in_phase_t *cordic_next_src = NULL;
@@ -594,15 +792,77 @@ static inline bool ddsli_codic_pending(void)
 // Setup / Initialization
 // -----------------------------------------------------------------------------
 
+/*
+ * Timing and synchronization assumptions:
+ *
+ *  - DAC and ADC are driven by hardware timers (TIM4 for DAC, TIM3 for ADC).
+ *  - Timer configuration (register setup) is performed on ddsli_setup()
+ *    by calling adc_dac_timer_init().
+ *  - During ddsli_setup(), timer counters and trigger/compare outputs
+ *    must remain disabled to avoid buffer desynchronization.
+ *
+ *  - DAC, ADC, DMA and CORDIC peripherals are initialized inside
+ *    ddsli_setup() via dac_init(), adc_dual_dma_circular_init() and
+ *    cordic_init().
+ *
+ * Timer behavior (configured in timer.c):
+ *
+ *  - TIM4 provides the DAC timing reference and triggers DAC conversion
+ *    on its update event.
+ *  - Due to the DAC internal one-cycle pipeline latency, the DAC DMA
+ *    request is sourced from a TIM4 compare event instead of the DAC
+ *    default request source.
+ *
+ *  - TIM3 is configured as a slave only for startup synchronization:
+ *        TIM3 starts on the TIM4 update trigger to guarantee deterministic
+ *        ADC/DAC phase alignment at t = 0.
+ *    After startup, TIM3 runs freely and independently.
+ *
+ *  - TIM3 and TIM4 use identical prescaler and auto-reload values.
+ *
+ * Buffer indexing:
+ *
+ *  - phase and adc/dac buffers are indexed modulo 2 (ping-pong)
+ *  - sincos buffers are indexed modulo 3
+ *
+ * Initialization sequence (ddsli_setup):
+ *
+ *  1) Initialize peripherals:
+ *      - DAC, ADC, CORDIC
+ *      - NVIC and internal synchronization flags
+ *
+ *  2) Initialize DDS state:
+ *      - Initialize phase accumulators
+ *      - Generate phase half-buffers 0 and 1
+ *
+ *  3) Prime DDS pipeline (timers still stopped):
+ *      - phase[0] -> sincos[0] -> dac[0]
+ *      - phase[1] -> sincos[1] -> dac[1]
+ *      - Generate next phase half-buffer (overwriting)
+ *
+ *  4) Start DAC DMA:
+ *      - DAC DMA is started, but no conversions occur until timers
+ *        are enabled externally.
+ *
+ *  After this function returns:
+ *    - ADC/DAC timer triggers may be enabled
+ *    - The pipeline is fully primed and ready for streaming
+ *
+ * Steady-state operation:
+ *
+ *  - Half-buffer events advance the pipeline:
+ *      * DAC reads current half-buffer
+ *      * ADC writes current half-buffer
+ *      * CORDIC computes future sincos
+ *      * CPU demodulates past adc/sincos
+ *      * CPU generates future phase data (2 steps ahead)
+ */
+
 void ddsli_setup(void)
 {
-    // Assumes ADC and DAC are triggered alternately (with a timer, for
-    // example) but is currently disabled, otherwise buffers will
-    // be unsynchronized. After setup you can turn them on.
-    // Note that they have to be initialized/powered (rcc clocks etc), but
-    // with counter or trigger/compare outputs disabled.
-
     // Initialize peripherals.
+    dma_memcpy_init();
+    adc_dac_timer_init();
     dac_init();
     adc_dual_dma_circular_init((uint32_t *)adc_buf, 2 * HB_LEN);
     cordic_init();
@@ -674,29 +934,6 @@ bool ddsli_step_ready(void)
     return false;
 }
 
-/*
-Initilization steps:
-Note that adc/dac/phase buffers indexes are modulo 2, sincos is modulo 3
-
- 1. Load phase 0 and 1
- 2. Run CORDIC on phase 0 and 1 -> sincos 0 and 1 -> dac 0 and 1
- 3. Load phase 2
- 4. Start DAC/ADC
-- Wait DAC half buffer: dac/adc 0 done. halfs = 2
- 5. Run CORDIC on phase 2 -> sincos 2 -> dac 2
- 6. Run demod on adc 0/sincos 0
- 7. Load phase 3
-- Wait DAC full buffer: dac/adc 3 done. halfs = 3
- 8. Run CORDIC on phase 3 -> sincos 3 -> dac 3
- 9. Run demod for adc 1/sincos 1
- 10. Load phase 4
-- Wait DAC half buffer: dac/adc 0 done. halfs = 4
- 11. Run CORDIC on phase 4 -> sincos 4 -> dac 4
- 12. Run demod for adc 2/sincos 2
- 13. Load phase 5
-- Repeat...
-*/
-
 int8_t ddsli_step(void)
 {
     cm_disable_interrupts();
@@ -764,7 +1001,7 @@ int8_t ddsli_step(void)
         cm_enable_interrupts();
         if (!ddsli_codic_pending())
         {
-            // This should not happen, but if it does...
+            // This should not happen on double mode, but if it does...
             ddsli_mix_adc_halfbuffer(buffers_half, (sincos_thirds + 1) % SINCOS_BUFF_HALVES);
             ddsli_process_dac_halfbuffer(buffers_half, sincos_thirds);
 

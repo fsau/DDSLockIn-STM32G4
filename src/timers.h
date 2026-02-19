@@ -5,20 +5,45 @@
 /*
  * Configure timers for DAC (TIM4) and ADC (TIM3)
  *
- * TIM4 provides the DAC timing reference and triggers DAC conversion on the update
- * event. To compensate for the DAC internal one-cycle pipeline latency, the DAC
- * DMA request is sourced from a TIM4 compare event rather than the DAC’s default
- * DMA request source.
+ * TIM4 provides the DAC timing reference and triggers DAC conversion on
+ * the update event.
  *
- * TIM3 is configured as a slave only for startup synchronization: it starts on
- * the TIM4 update trigger to guarantee a deterministic phase relationship at
- * t = 0. After startup, TIM3 runs freely and independently.
+ * To compensate for the DAC internal one-cycle pipeline latency, the DAC
+ * DMA request is sourced from a TIM4 compare event rather than the DAC’s
+ * default DMA request source, so DAC DMA always runs one half-cycle ahead
+ * of the DAC conversion.
  *
- * Both timers are programmed with identical prescaler and auto-reload values.
- * These parameters must always match and must not be modified while running,
- * as doing so breaks the DAC/ADC phase relationship.
+ * TIM3 is configured as a slave only for startup synchronization:
+ *   - TIM3 starts on the TIM4 update trigger to guarantee a deterministic
+ *     ADC/DAC phase relationship at t = 0.
+ *   - After startup, TIM3 runs freely and independently.
  *
- * Optional PWM outputs are enabled for external timing observation and debugging.
+ * Both timers are programmed with identical prescaler and auto-reload
+ * values. These parameters must always match to preserve the DAC/ADC
+ * phase relationship.
+ *
+ * Optional PWM outputs may be enabled for external timing observation
+ * and debugging.
+ *
+ * Control functions:
+ *
+ *  - adc_dac_timer_init()
+ *        Configure TIM3 and TIM4 registers.
+ *        Timers remain stopped and trigger outputs disabled.
+ *
+ *  - adc_dac_timer_start()
+ *        Start timers, enabling DAC/ADC triggering.
+ *
+ *  - adc_dac_timer_stop()
+ *        Stop both timers safely.
+ *
+ *  - adc_dac_timer_restart()
+ *        Restart timers after adc_dac_timer_stop().
+ *
+ *  - adc_dac_timer_adjust(rate, prescaler)
+ *        Adjust timer rate while running.
+ *        Updates are applied in a phase-coherent manner so the DAC/ADC
+ *        relationship is preserved.
  */
 
 void adc_dac_timer_init(void);

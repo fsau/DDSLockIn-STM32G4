@@ -78,9 +78,7 @@ int main(void)
                             GPIO6);
     gpio_set(GPIOC, GPIO6);
 
-    dma_memcpy_init();
     usbserial_init();
-    adc_dac_timer_init();
     ddsli_setup();
 
     for (uint32_t i = 0; i < 1000000; i += 1)
