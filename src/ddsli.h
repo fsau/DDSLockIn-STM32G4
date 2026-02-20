@@ -118,6 +118,9 @@ int8_t ddsli_step(void);
 /* Returns true if at least one demodulated output sample is available */
 bool ddsli_output_ready(void);
 
+/* Returns number of samples avaliable in output FIFO buffer */
+int32_t ddsli_output_count(void);
+
 /* Pop one demodulated output sample from the FIFO.
  *
  * Returns true if a sample was written to *out.

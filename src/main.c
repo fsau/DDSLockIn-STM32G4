@@ -2,7 +2,6 @@
 #include <math.h>
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
-#include <libopencm3/cm3/systick.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/dac.h>
 #include <libopencm3/stm32/timer.h>
@@ -21,6 +20,7 @@
 typedef enum {
     CMD_ACT_NONE = 0,
     CMD_ACT_SET_FREQ,
+    CMD_ACT_SET_FREQ_DUAL_SWEEP,
     CMD_ACT_CTRL_STOP,
     CMD_ACT_CTRL_RESTART,
     CMD_ACT_CAPTURE_ONCE,
@@ -28,37 +28,33 @@ typedef enum {
     CMD_ACT_PRINT_PACKETS,
     CMD_ACT_ADJUST_AUTOCAP,
     CMD_ACT_TOGGLE_AUTOCAP,
-    CMD_ACT_TOGGLE_AUTOOUT
+    CMD_ACT_TOGGLE_AUTOOUT,
+    CMD_ACT_ADJUST_FA,
+    CMD_ACT_ADJUST_FB,
+    CMD_ACT_ADJUST_SWA,
+    CMD_ACT_ADJUST_SWB,
+    CMD_ACT_TOGGLE_ECHO
 } cmd_action_t;
 
 typedef enum {
     CMD_IDLE,
-    CMD_FREQ,
+    CMD_INPUT_FREQ,
     CMD_CTRL,
     CMD_CAPT
 } cmd_state_t;
 
 typedef struct {
     cmd_state_t state;
-    uint32_t    value;
+    uint64_t    value;
+    bool        neg;
     uint8_t     digits;
 } cmd_parser_t;
 
-static cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint32_t *arg);
-void systick_setup(uint32_t sysclk_hz);
-void delay_ms(uint32_t ms);
-void bp_here(void);
-void jump_to_dfu(void);
-void print_out_packet(void);
-void print_legible_demod(void);
-void capture_and_print_buff(void);
+cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint64_t *arg);
 
-volatile uint32_t clock_ticks = 0;
-uint32_t lasttick = 0;
-uint32_t auto_capture_dly = 100;
-uint32_t auto_output_dly = 1;
-bool auto_output = 0;
-bool auto_capture = 0;
+void print_output_packet(void);
+void print_capture_buff(void);
+void print_legible_demod(void);
 
 int main(void)
 {
@@ -78,14 +74,23 @@ int main(void)
                             GPIO6);
     gpio_set(GPIOC, GPIO6);
 
-    usbserial_init();
-    ddsli_setup();
+    usbserial_init(); // Communications
+    ddsli_setup(); // Everything else
 
     for (uint32_t i = 0; i < 1000000; i += 1)
         __asm__("nop");
 
     cm_enable_interrupts();
-    adc_dac_timer_start();
+    adc_dac_timer_start(); // Start DDS+ADC
+
+    bool echo_serial = false;
+    uint32_t auto_capture_dly = 100;
+    int32_t auto_output = 0;
+    int32_t auto_capture = 0;
+    float fa=33768.0, fb=33768.1, swa=1.0, swb=0.0;
+    float sample_f = 1000000.0;
+
+    ddsli_set_frequency_dual(fa, fb, swa, swb, sample_f);
 
     while (clock_ticks < 300)
         __asm__("nop");
@@ -97,16 +102,39 @@ int main(void)
         uint8_t buf[64] = {0};
         uint8_t len = usbserial_read_rx(buf, 64);
 
+        if(echo_serial && len) usbserial_send_tx(buf,len); 
+
         for (uint32_t i = 0; i < len; i++)
         {
-            uint32_t arg = 0;
+            uint64_t arg = 0;
             cmd_action_t act = cmd_parse_byte(&parser, buf[i], &arg);
 
             switch (act)
             {
             case CMD_ACT_SET_FREQ:
-                ddsli_set_frequency((float)arg / 10.73741824f,
-                                    0.0f, 1000000);
+                ddsli_set_frequency_dual((float)arg / 10.73741824f,
+                                         (float)arg / 10.73741824f,
+                                    0.0f, 0.0f, 1000000);
+                break;
+
+            case CMD_ACT_SET_FREQ_DUAL_SWEEP:
+                ddsli_set_frequency_dual(fa, fb, swa, swb, sample_f);
+                break;
+
+            case CMD_ACT_ADJUST_FA:
+                fa = (float)arg/1000.0;
+                break;
+
+            case CMD_ACT_ADJUST_FB:
+                fb = (float)arg/1000.0;
+                break;
+
+            case CMD_ACT_ADJUST_SWA:
+                swa = (float)arg;
+                break;
+
+            case CMD_ACT_ADJUST_SWB:
+                swb = (float)arg;
                 break;
 
             case CMD_ACT_ADJUST_AUTOCAP:
@@ -122,7 +150,8 @@ int main(void)
                 break;
 
             case CMD_ACT_CAPTURE_ONCE:
-                capture_and_print_buff();
+                if(ddsli_capture_ready()) ddsli_capture_buffers(4);
+                auto_capture++;
                 break;
 
             case CMD_ACT_PRINT_DEMOD:
@@ -130,121 +159,80 @@ int main(void)
                 break;
 
             case CMD_ACT_PRINT_PACKETS:
-                print_out_packet();
+                auto_output++;
                 break;
 
             case CMD_ACT_TOGGLE_AUTOCAP:
-                auto_capture = !auto_capture;
+                if(ddsli_capture_ready()) ddsli_capture_buffers(4);
+                auto_capture = (auto_capture==-1)?0:-1;
                 break;
+
             case CMD_ACT_TOGGLE_AUTOOUT:
-                auto_output = !auto_output;
+                auto_output = (auto_output==-1)?0:-1;
                 break;
+
+            case CMD_ACT_TOGGLE_ECHO:
+                echo_serial = !echo_serial;
+                break;
+            
             default:
                 break;
             }
+        }
 
-            if(auto_capture)
+        if(auto_capture!=0)
+        {
+            static uint32_t last_clock = 0;
+            if( (clock_ticks/auto_capture_dly != last_clock) &&
+                ddsli_capture_ready() )
             {
-                static uint32_t last_clock = 0;
-                if(clock_ticks/auto_capture_dly != last_clock)
-                {
-                    last_clock = clock_ticks/auto_capture_dly;
-                    capture_and_print_buff();
-                }
+                last_clock = clock_ticks/auto_capture_dly;
+                print_capture_buff();
+                ddsli_capture_buffers(4);
+                if(auto_capture > 0) auto_capture--;
             }
+        }
 
-            if(auto_output)
+        if(auto_output!=0)
+        {
+            if(ddsli_output_count()>=16)
             {
-                static uint32_t last_clock = 0;
-                if(clock_ticks/auto_output_dly != last_clock)
-                {
-                    last_clock = clock_ticks/auto_capture_dly;
-                    print_out_packet();
-                }
+                print_output_packet();
+                if(auto_output > 0) auto_output--;
             }
         }
     }
 }
 
-void sys_tick_handler(void)
+cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint64_t *arg)
 {
-    clock_ticks++; // ms
-}
-
-// Initialize SysTick for millisecond ticks
-void systick_setup(uint32_t sysclk_hz)
-{
-    // SysTick = SYSCLK / 1000 -> 1ms tick
-    systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
-    systick_set_reload(sysclk_hz / 1000 - 1);
-    systick_clear();
-    systick_counter_enable();
-    systick_interrupt_enable();
-    nvic_enable_irq(NVIC_SYSTICK_IRQ);
-}
-
-// Blocking delay in milliseconds
-void delay_ms(uint32_t ms)
-{
-    uint32_t start = clock_ticks;
-    while ((clock_ticks - start) < ms)
-        __asm__("nop");
-}
-
-// Fixed breakpoint for debug
-void bp_here(void)
-{
-    __asm__ volatile("bkpt #0");
-} 
-
-void jump_to_dfu(void) // not working very well...
-{
-    usbserial_disconnect();
-    nvic_disable_irq(NVIC_SYSTICK_IRQ);
-
-    // Disable SysTick if used
-    SCB_ICSR |= SCB_ICSR_PENDSTCLR;
-
-    // Set vector table to bootloader (system memory)
-    SCB_VTOR = 0x1FFF0000;
-
-    // Get bootloader entry point
-    uint32_t *bootloader_entry = (uint32_t *)(SCB_VTOR + 4);
-    uint32_t jump_address = *bootloader_entry;
-
-    // Set stack pointer from bootloader's vector table
-    __asm__ volatile("msr msp, %0" : : "r"(*(volatile uint32_t *)SCB_VTOR));
-
-    // Jump to bootloader
-    void (*bootloader)(void) = (void (*)(void))jump_address;
-    bootloader();
-
-    // Never returns
-    while (1)
-        ;
-}
-
-static cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint32_t *arg)
-{
-    /* Digit accumulation */
-    if (c >= '0' && c <= '9' && p->digits < 10) {
+    // Digit accumulation
+    if (c >= '0' && c <= '9' && p->digits < 18)
+    {
         p->value = p->value * 10 + (c - '0');
         p->digits++;
         return CMD_ACT_NONE;
     }
+    else if(c == '-')
+    {
+        p->neg = !p->neg;
+        return CMD_ACT_NONE;
+    }
 
-    switch (p->state) {
-
+    switch (p->state)
+    {
     case CMD_IDLE:
         if (c == 'F' || c == 'f') {
-            p->state  = CMD_FREQ;
+            p->state  = CMD_INPUT_FREQ;
             p->value  = 0;
             p->digits = 0;
+            p->neg = 0;
         }
         else if (c == 'A' || c == 'a') {
             p->state  = CMD_CAPT;
             p->value  = 0;
             p->digits = 0;
+            p->neg = 0;
         }
         else if (c == 'C' || c == 'c') {
             p->state = CMD_CTRL;
@@ -258,13 +246,28 @@ static cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint32_t *arg)
         else if (c == 'P' || c == 'p') {
             return CMD_ACT_PRINT_PACKETS;
         }
+        else if (c == 'U' || c == 'u') {
+            return CMD_ACT_SET_FREQ_DUAL_SWEEP;
+        }
+        else if (c == 'E' || c == 'e') {
+            return CMD_ACT_TOGGLE_ECHO;
+        }
         break;
 
-    case CMD_FREQ:
+    case CMD_INPUT_FREQ:
         *arg = p->value;
         p->state = CMD_IDLE;
         p->value = 0;
         p->digits = 0;
+        p->neg = 0;
+        if (c == 'A' || c == 'a')
+            return CMD_ACT_ADJUST_FA;
+        if (c == 'B' || c == 'b')
+            return CMD_ACT_ADJUST_FB;
+        if (c == 'Q' || c == 'q')
+            return CMD_ACT_ADJUST_SWA;
+        if (c == 'G' || c == 'g')
+            return CMD_ACT_ADJUST_SWB;
         return CMD_ACT_SET_FREQ;
 
     case CMD_CTRL:
@@ -284,13 +287,22 @@ static cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint32_t *arg)
         p->state = CMD_IDLE;
         p->value = 0;
         p->digits = 0;
+        p->neg = 0;
         return CMD_ACT_ADJUST_AUTOCAP;
     }
 
     return CMD_ACT_NONE;
 }
 
-void print_out_packet(void)
+void print_capture_buff(void)
+{
+    while (!ddsli_capture_ready()) __asm__("nop");
+    uint8_t header[4] = {0x55,0x55,0x55,0x00};
+    usbserial_send_tx(header, 4);
+    usbserial_send_tx((uint8_t *)ddsli_get_capt_adc(), 4 * 4 * HB_LEN);
+}
+
+void print_output_packet(void)
 {
     uint32_t dcnt = 0;
     ddsli_output_t obuf;
@@ -388,19 +400,5 @@ void print_legible_demod(void)
         *p++ = '\r'; *p++ = '\n';
 
         usbserial_send_tx(outbuf, p - (char *)outbuf);
-    }
-}
-
-void capture_and_print_buff(void)
-{
-    ddsli_capture_buffers(4);
-    while (!ddsli_capture_ready())
-        __asm__("nop");
-    {
-        uint8_t header[4] = {0x55,0x55,0x55,0x00};
-        usbserial_send_tx(header, 4);
-        usbserial_send_tx(
-            (uint8_t *)ddsli_get_capt_adc(),
-            4 * 4 * HB_LEN);
     }
 }

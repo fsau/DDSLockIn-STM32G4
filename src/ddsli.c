@@ -409,16 +409,16 @@ void ddsli_set_frequency(float f, float sweep, float sample_f)
 // Frequency management (dual DDS)
 void ddsli_set_frequency_dual(float f, float fb, float sweep, float sweepb, float sample_f)
 {
-    volatile ddsli_phase_inc_t phase_inc = (ddsli_phase_inc_t)((f * (1ULL << 32)) / sample_f);
+    ddsli_phase_inc_t phase_inc = (ddsli_phase_inc_t)((f * (1ULL << 32)) / sample_f);
     phase_dds.phase_inc = phase_inc * (1ULL << 32);
 
-    volatile ddsli_phase_inc_t phase_incb = (ddsli_phase_inc_t)((fb * (1ULL << 32)) / sample_f);
+    ddsli_phase_inc_t phase_incb = (ddsli_phase_inc_t)((fb * (1ULL << 32)) / sample_f);
     phase_ddsB.phase_inc = phase_incb * (1ULL << 32);
 
     if (sweep != 0.0f)
     {
         float sweep_rate = sweep / sample_f; // Normalized sweep rate
-        ddsli_phase_inc_delta_t delta = (ddsli_phase_inc_delta_t)((sweep_rate * (1ULL << 32)) / sample_f);
+        ddsli_phase_inc_delta_t delta = (ddsli_phase_inc_delta_t)(sweep_rate * (1ULL << 32)) / sample_f;
         phase_dds.phase_inc_delta = delta;
     }
     else
@@ -429,7 +429,7 @@ void ddsli_set_frequency_dual(float f, float fb, float sweep, float sweepb, floa
     if (sweepb != 0.0f)
     {
         float sweep_rate = sweepb / sample_f;
-        ddsli_phase_inc_delta_t delta = (ddsli_phase_inc_delta_t)((sweep_rate * (1ULL << 32)) / sample_f);
+        ddsli_phase_inc_delta_t delta = (ddsli_phase_inc_delta_t)(sweep_rate * (1ULL << 32)) / sample_f;
         phase_ddsB.phase_inc_delta = delta;
     }
     else
@@ -845,7 +845,7 @@ static inline bool ddsli_codic_pending(void)
  *        are enabled externally.
  *
  *  After this function returns:
- *    - ADC/DAC timer triggers may be enabled
+ *    - ADC/DAC timer triggers may be enabled via adc_dac_timer_start()
  *    - The pipeline is fully primed and ready for streaming
  *
  * Steady-state operation:
@@ -1023,6 +1023,18 @@ bool ddsli_output_ready(void)
 {
     cm_disable_interrupts();
     bool ret = lpf_fifo_wr != lpf_fifo_rd;
+    cm_enable_interrupts();
+
+    return ret;
+}
+
+int32_t ddsli_output_count(void)
+{
+    int32_t ret;
+    cm_disable_interrupts();
+    int32_t w = lpf_fifo_wr, r = lpf_fifo_rd;
+    if(w >= r) ret = w - r;
+    else ret = LPF_FIFO_LEN - r + w; // overflow
     cm_enable_interrupts();
 
     return ret;

@@ -25,3 +25,10 @@ char *fmt_f(char *p, float x, int width, int decimals);
 
 void *amemset(void *dst, int c, size_t n);
 void *amemcpy(void *dst, const void *src, size_t n);
+
+void systick_setup(uint32_t sysclk_hz);
+void delay_ms(uint32_t ms);
+void bp_here(void);
+void jump_to_dfu(void);
+
+extern volatile uint32_t clock_ticks;

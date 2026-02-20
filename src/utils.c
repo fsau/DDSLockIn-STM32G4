@@ -1,7 +1,37 @@
 #include "utils.h"
+#include "usbserial.h"
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/cortex.h>
 #include <libopencm3/stm32/dma.h>
+#include <libopencm3/cm3/systick.h>
+#include <libopencm3/cm3/scb.h>
+
+volatile uint32_t clock_ticks = 0;
+
+void sys_tick_handler(void)
+{
+    clock_ticks++; // ms
+}
+
+// Initialize SysTick for millisecond ticks
+void systick_setup(uint32_t sysclk_hz)
+{
+    // SysTick = SYSCLK / 1000 -> 1ms tick
+    systick_set_clocksource(STK_CSR_CLKSOURCE_AHB);
+    systick_set_reload(sysclk_hz / 1000 - 1);
+    systick_clear();
+    systick_counter_enable();
+    systick_interrupt_enable();
+    nvic_enable_irq(NVIC_SYSTICK_IRQ);
+}
+
+// Blocking delay in milliseconds
+void delay_ms(uint32_t ms)
+{
+    uint32_t start = clock_ticks;
+    while ((clock_ticks - start) < ms)
+        __asm__("nop");
+}
 
 void *amemset(void *dst, int c, size_t n)
 {
@@ -126,4 +156,37 @@ char *fmt_f(char *p, float x, int width, int decimals)
 
     amemcpy(p, tmp, len);
     return p + len;
+}
+
+// Fixed breakpoint for debug
+void bp_here(void)
+{
+    __asm__ volatile("bkpt #0");
+} 
+
+void jump_to_dfu(void) // not working very well...
+{
+    usbserial_disconnect();
+    nvic_disable_irq(NVIC_SYSTICK_IRQ);
+
+    // Disable SysTick if used
+    SCB_ICSR |= SCB_ICSR_PENDSTCLR;
+
+    // Set vector table to bootloader (system memory)
+    SCB_VTOR = 0x1FFF0000;
+
+    // Get bootloader entry point
+    uint32_t *bootloader_entry = (uint32_t *)(SCB_VTOR + 4);
+    uint32_t jump_address = *bootloader_entry;
+
+    // Set stack pointer from bootloader's vector table
+    __asm__ volatile("msr msp, %0" : : "r"(*(volatile uint32_t *)SCB_VTOR));
+
+    // Jump to bootloader
+    void (*bootloader)(void) = (void (*)(void))jump_address;
+    bootloader();
+
+    // Never returns
+    while (1)
+        ;
 }
