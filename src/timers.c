@@ -61,8 +61,8 @@ void adc_dac_timer_restart(void)
 {
     cm_disable_interrupts();
     timer_slave_set_mode(TIM3, TIM_SMCR_SMS_RM); // Make sure they get in sync
-    timer_enable_counter(TIM4);
     timer_enable_counter(TIM3);
+    timer_enable_counter(TIM4);
     cm_enable_interrupts();
 }
 

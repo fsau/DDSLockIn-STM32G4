@@ -85,7 +85,6 @@
  *  - ADC and DAC buffers are single-instance; channel separation
  *    is resolved during synthesis and demodulation.
  *
- *
  * ================================================================
  * 2) Data path (single DDS)
  * ================================================================
@@ -95,13 +94,12 @@
  *   [CPU phase accumulator]
  *        -> phase_buf
  *        -> [CORDIC]
- *        -> sincos_buf
+ *        -> sincos_buf (-> [CPU demux])
  *        -> [CPU LC or DMA memcpy]
  *        -> dac_buf
  *        -> [DAC]
  *
- * In parallel:
- *                       sincos_buf 
+ * In parallel:           sincos_buf
  *                            |
  *                            v
  *    [ADC] -> adc_buf -> [CPU demux] -> out_fifo
@@ -115,7 +113,7 @@
  *
  * |    t = n-1    |  t = n (now)  |    t = n+1    |   t = n+2    |
  * |---------------|---------------|---------------|--------------|
- * |               |               | phase_buf[1]  | phase_buf[0] |
+ * |               |               | phase_buf[0]  | phase_buf[1] |
  * | sincos_buf[0] | sincos_buf[1] | sincos_buf[3] |              |
  * |               |  dac_buf[0]   |  dac_buf[1]   |              |
  * |  adc_buf[0]   |  adc_buf[1]   |               |              |
@@ -828,7 +826,7 @@ static inline bool ddsli_codic_pending(void)
  * Initialization sequence (ddsli_setup):
  *
  *  1) Initialize peripherals:
- *      - DAC, ADC, CORDIC
+ *      - DAC, ADC, CORDIC, timers (init but don't enable)
  *      - NVIC and internal synchronization flags
  *
  *  2) Initialize DDS state:

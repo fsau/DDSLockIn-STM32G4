@@ -84,7 +84,7 @@ int main(void)
     adc_dac_timer_start(); // Start DDS+ADC
 
     bool echo_serial = false;
-    uint32_t auto_capture_dly = 100;
+    uint32_t auto_capture_dly = 1;
     int32_t auto_output = 0;
     int32_t auto_capture = 0;
     float fa=33768.0, fb=33768.1, swa=1.0, swb=0.0;

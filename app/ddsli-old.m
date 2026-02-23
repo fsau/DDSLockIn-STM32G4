@@ -168,13 +168,15 @@ ser = serialport(serialfname, 'timeout', 0.001);
 
 x=[];
 disp('Capturing...')
+write(ser,'cp');
 tic();
 while length(x) < 2000000
-    write(ser,'p');
     pause(0.01);
     x=[x read(ser,10000)];
 endwhile
 toc();
+
+write(ser,'cp');
 
 disp('Processing...')
 tic();
@@ -193,10 +195,16 @@ for i = 1:length(as)
     vs(i) = as{i}.chA(1);
 endfor
 
+for i = 1:length(as)
+phs(i) = angle(as{i}.chB(1) + 1i*as{i}.chB(2));
+endfor
+
 figure(1);
 plot(fs);
 figure(2);
 plot(vs);
+figure(3);
+plot(phs);
 
 % pkg load signal  % for plotting and real-time updates
 
