@@ -12,12 +12,11 @@ extern "C" {
 
 #define BLOCK_DATA_BYTES 52
 #define RX_BUF_SIZE (1 << 24)   /* 16 MB */
-
 #define BLOCK_FIFO_LEN   (1024*256)
-
 #define ADC_FIFO_LEN     (64*64)
 #define ADC_PACKET_BYTES 4096
 #define ADC_SAMPLES_PER_PACKET (ADC_PACKET_BYTES / 2)
+#define DDSLI_DEFAULT_BAUD B115200
 
 /* ===================== TYPES ===================== */
 

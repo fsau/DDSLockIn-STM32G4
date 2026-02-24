@@ -5,8 +5,7 @@ A firmware and toolset for generating and analyzing frequency sweeps on an STM32
 Contents
 - `src/` — Firmware source code (`main.c` plus one `.c/.h` pair per module)
 - `libopencm3/` — libopencm3 firmware library (submodule)
-- `sweepgui/` — Python GUI for configuring, running, and saving sweeps
-- `scripts/` — Octave scripts for general control, post-processing, and measurements
+- `app/` — Octave and Python bindings for sending commands and receiving data (lock-in output and ADC frames), with examples (WIP).
 - `docs/` — Reference material (datasheets, manuals, pin configurations, etc.)
 
 Requirements
@@ -33,14 +32,9 @@ Notes
 - This repository contains firmware sources and desktop tools intended for development and measurement. Adjust flashing and build steps to match your hardware and toolchain.
 
 Todo
-- ~~Quite a lot of things: DAC waveform generation (currently uses a AD9833 DDS frequency generator), run the lockin detection/quadrature demodulation in STM32 instead of in the app/GUI, and apply an onboard PLL loop for resonance measurements.~~
 - DDS/Lock-in base done, missing some things (see `ddsli.c`).
 - PLL and application code for controlling the DDS/Lock-in for measurements.
-- Fixing the USB CDC/ADC interface, sometime fails.
+- Improving the USB CDC/ADC interface.
   - Add package structure with checksum and ack?
-- Update `sweepgui` to use the DDS/lock-in.
-
-GUI Screenshot
-
-![GUI Screenshot](docs/screenshot.png)
+- Finish octave/python bindings and applications.
 

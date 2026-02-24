@@ -11,8 +11,6 @@
 #include <stdint.h>
 #include <glob.h>
 
-#define DDSLI_DEFAULT_BAUD B115200
-
 /* ===================== FIFO TYPES ===================== */
 
 typedef struct {

@@ -233,3 +233,6 @@ __marimo__/
 # Octave
 *.oct
 octave-worksapce
+
+# C
+*.o
