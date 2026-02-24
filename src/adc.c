@@ -13,7 +13,7 @@ volatile uint32_t adc_capture_counter = 0;
 void adc_dual_dma_sigleshot_init(void)
 {
     rcc_periph_clock_enable(RCC_GPIOA);
-    gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO6);
+    gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0 | GPIO1);
 
     rcc_periph_clock_enable(RCC_ADC12);
     rcc_periph_clock_enable(RCC_DMA1);
@@ -56,7 +56,7 @@ void adc_dual_dma_sigleshot_init(void)
     adc_set_right_aligned(ADC1);
     adc_set_sample_time(ADC1, 0, ADC_SMPR_SMP_2DOT5CYC); // Fastest sampling
 
-    uint8_t adc1_channels[] = {3}; // Channel 3 (PA2)
+    uint8_t adc1_channels[] = {1}; // Channel 1 (PA0)
     adc_set_regular_sequence(ADC1, 1, adc1_channels);
 
     /*  Configure ADC2 (Slave) */
@@ -64,7 +64,7 @@ void adc_dual_dma_sigleshot_init(void)
     adc_set_right_aligned(ADC2);
     adc_set_sample_time(ADC2, 1, ADC_SMPR_SMP_2DOT5CYC); // Fastest sampling
 
-    uint8_t adc2_channels[] = {3}; // Channel 3 (PA6)
+    uint8_t adc2_channels[] = {2}; // Channel 2 (PA1)
     adc_set_regular_sequence(ADC2, 1, adc2_channels);
 
     ADC_CFGR1(ADC1) |= (1 << 31); // JQDIS: Injected Queue disable
@@ -126,7 +126,7 @@ void adc_dual_dma_sigleshot_init(void)
 void adc_dual_dma_circular_init(void *buf, uint32_t len)
 {
     rcc_periph_clock_enable(RCC_GPIOA);
-    gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO2 | GPIO6);
+    gpio_mode_setup(GPIOA, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, GPIO0 | GPIO1);
 
     rcc_periph_clock_enable(RCC_ADC12);
     rcc_periph_clock_enable(RCC_DMA1);
@@ -171,7 +171,7 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len)
     adc_set_right_aligned(ADC1);
     adc_set_sample_time(ADC1, 0, ADC_SMPR_SMP_2DOT5CYC); // Fastest sampling
 
-    uint8_t adc1_channels[] = {3}; // Channel 3 (PA2)
+    uint8_t adc1_channels[] = {1}; // Channel 1 (PA0)
     adc_set_regular_sequence(ADC1, 1, adc1_channels);
 
     /*  Configure ADC2 (Slave) */
@@ -179,7 +179,7 @@ void adc_dual_dma_circular_init(void *buf, uint32_t len)
     adc_set_right_aligned(ADC2);
     adc_set_sample_time(ADC2, 1, ADC_SMPR_SMP_2DOT5CYC); // Fastest sampling
 
-    uint8_t adc2_channels[] = {3}; // Channel 3 (PA6)
+    uint8_t adc2_channels[] = {2}; // Channel 2 (PA1)
     adc_set_regular_sequence(ADC2, 1, adc2_channels);
 
     ADC_CFGR1(ADC1) |= (1 << 31); // JQDIS: Injected Queue disable
@@ -253,8 +253,8 @@ void adc_capture_singleshot_buffer(uint16_t *adc1_data, uint16_t *adc2_data)
     adc_set_right_aligned(ADC1);
     adc_set_right_aligned(ADC2);
 
-    uint8_t adc1_channels[] = {3}; // Channel 3 (PA2)
-    uint8_t adc2_channels[] = {3}; // Channel 3 (PA6)
+    uint8_t adc1_channels[] = {1}; // Channel 1 (PA0')
+    uint8_t adc2_channels[] = {2}; // Channel 2 (PA1)
     adc_set_regular_sequence(ADC1, 1, adc1_channels);
     adc_set_regular_sequence(ADC2, 1, adc2_channels);
 
