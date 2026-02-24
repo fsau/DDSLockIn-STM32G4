@@ -50,7 +50,7 @@ typedef struct {
     uint8_t     digits;
 } cmd_parser_t;
 
-cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint64_t *arg);
+cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, int64_t *arg);
 
 void print_output_packet(void);
 void print_capture_buff(void);
@@ -106,7 +106,7 @@ int main(void)
 
         for (uint32_t i = 0; i < len; i++)
         {
-            uint64_t arg = 0;
+            int64_t arg = 0;
             cmd_action_t act = cmd_parse_byte(&parser, buf[i], &arg);
 
             switch (act)
@@ -204,7 +204,7 @@ int main(void)
     }
 }
 
-cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint64_t *arg)
+cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, int64_t *arg)
 {
     // Digit accumulation
     if (c >= '0' && c <= '9' && p->digits < 18)
@@ -255,7 +255,7 @@ cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, uint64_t *arg)
         break;
 
     case CMD_INPUT_FREQ:
-        *arg = p->value;
+        *arg = p->value * ((p->neg)?-1:1);
         p->state = CMD_IDLE;
         p->value = 0;
         p->digits = 0;
