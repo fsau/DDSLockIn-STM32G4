@@ -1,6 +1,7 @@
 #include "ddsli_core.h"
 
 #include <string.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -8,6 +9,9 @@
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
+#include <glob.h>
+
+#define DDSLI_DEFAULT_BAUD B115200
 
 /* ===================== FIFO TYPES ===================== */
 
@@ -44,6 +48,11 @@ static void block_fifo_push(ddsli_ctx_t *c, const ddsli_block_t *b)
     if (c->block_fifo.count == BLOCK_FIFO_LEN)
         return;
 
+    fprintf(stderr,
+        "FIFO PUSH idx=%zu phase=%llu\n",
+        c->block_fifo.wr,
+        (unsigned long long)b->phase);
+
     c->block_fifo.buf[c->block_fifo.wr] = *b;
     c->block_fifo.wr = (c->block_fifo.wr + 1) % BLOCK_FIFO_LEN;
     c->block_fifo.count++;
@@ -54,9 +63,15 @@ static int block_fifo_pop(ddsli_ctx_t *c, ddsli_block_t *out)
     if (!c->block_fifo.count)
         return 0;
 
+    fprintf(stderr,
+        "FIFO POP idx=%zu phase=%llu\n",
+        c->block_fifo.rd,
+        (unsigned long long)out->phase);
+
     *out = c->block_fifo.buf[c->block_fifo.rd];
     c->block_fifo.rd = (c->block_fifo.rd + 1) % BLOCK_FIFO_LEN;
     c->block_fifo.count--;
+
     return 1;
 }
 
@@ -64,7 +79,7 @@ static void adc_fifo_push(ddsli_ctx_t *c, const uint8_t *raw)
 {
     if (c->adc_fifo.count == ADC_FIFO_LEN)
         return;
-
+    fprintf(stderr,"ADC FIFO PUSH. id=%ld\n", c->adc_fifo.wr);
     memcpy(c->adc_fifo.buf[c->adc_fifo.wr], raw, ADC_PACKET_BYTES);
     c->adc_fifo.wr = (c->adc_fifo.wr + 1) % ADC_FIFO_LEN;
     c->adc_fifo.count++;
@@ -75,6 +90,7 @@ static int adc_fifo_pop(ddsli_ctx_t *c, uint16_t *out)
     if (!c->adc_fifo.count)
         return 0;
 
+    fprintf(stderr,"ADC FIFO POP. id=%ld\n", c->adc_fifo.rd);
     memcpy(out,
            c->adc_fifo.buf[c->adc_fifo.rd],
            ADC_PACKET_BYTES);
@@ -118,22 +134,20 @@ static void parse_rx_buffer(ddsli_ctx_t *ctx)
 
         /* ---------- BLOCK PACKET ---------- */
         if (type == 0x20) {
-            if (pos + 4 + 57 > ctx->rxlen)
+            if (pos + 4 + BLOCK_DATA_BYTES > ctx->rxlen)
                 break;
 
             const uint8_t *p = ctx->rxbuf + pos + 4;
-            uint8_t term = p[56];
-
-            if (term != 0x77 && term != 0xAA) {
-                pos++;
-                continue;
-            }
-
+            uint8_t term = p[BLOCK_DATA_BYTES];
             ddsli_block_t blk;
             parse_block(p, &blk);
+
+            fprintf(stderr, "PARSE BLOCK at pos=%zu rxlen=%zu type=%02x header=%02x%02x%02x phase=%lu\n",
+            pos, ctx->rxlen, type, ctx->rxbuf[pos], ctx->rxbuf[pos+1], ctx->rxbuf[pos+2], blk.phase);
+
             block_fifo_push(ctx, &blk);
 
-            pos += 4 + 57;
+            pos += 4 + BLOCK_DATA_BYTES;
             continue;
         }
 
@@ -204,6 +218,23 @@ int ddsli_read_adc_packet(ddsli_ctx_t *ctx, uint16_t *out)
 
 /* ===================== SERIAL ===================== */
 
+static char *find_first_ttyacm(void)
+{
+    glob_t g;
+    if (glob("/dev/ttyACM*", 0, NULL, &g) != 0)
+        return NULL;
+
+    if (g.gl_pathc == 0) {
+        globfree(&g);
+        return NULL;
+    }
+
+    /* strdup so caller owns it */
+    char *dev = strdup(g.gl_pathv[0]);
+    globfree(&g);
+    return dev;
+}
+
 static int serial_open(const char *port, int baud)
 {
     int fd = open(port, O_RDWR | O_NOCTTY);
@@ -222,13 +253,29 @@ static int serial_open(const char *port, int baud)
 
 /* ===================== LIFECYCLE ===================== */
 
-ddsli_ctx_t *ddsli_open(const char *port, int baud)
+ddsli_ctx_t *ddsli_open(const char *port, speed_t baud)
 {
+    char *auto_port = NULL;
+
+    if (!port) {
+        auto_port = find_first_ttyacm();
+        if (!auto_port)
+            return NULL;
+        port = auto_port;
+    }
+
+    if (!baud)
+        baud = DDSLI_DEFAULT_BAUD;
+
     ddsli_ctx_t *ctx = calloc(1, sizeof(*ctx));
-    if (!ctx)
+    if (!ctx) {
+        free(auto_port);
         return NULL;
+    }
 
     ctx->fd = serial_open(port, baud);
+    free(auto_port);
+
     if (ctx->fd < 0) {
         free(ctx);
         return NULL;
@@ -254,16 +301,23 @@ void ddsli_close(ddsli_ctx_t *ctx)
         return;
 
     atomic_store(&ctx->running, 0);
-    pthread_join(ctx->rx_thread, NULL);
 
     close(ctx->fd);
+
+    pthread_join(ctx->rx_thread, NULL);
+
     pthread_mutex_destroy(&ctx->lock);
     free(ctx);
 }
 
 /* ===================== CONTROL ===================== */
 
-int ddsli_toggle_out_strem(ddsli_ctx_t *ctx)
+int ddsli_toggle_out_stream(ddsli_ctx_t *ctx)
 {
     return write(ctx->fd, "cp", 2);
+}
+
+int ddsli_send_cmd(ddsli_ctx_t *ctx, char *str, uint32_t strlen)
+{
+    return write(ctx->fd, str, strlen);
 }

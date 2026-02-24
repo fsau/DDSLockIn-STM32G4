@@ -2,6 +2,7 @@
 #define DDSLI_CORE_H
 
 #include <stdint.h>
+#include <termios.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -9,11 +10,12 @@ extern "C" {
 
 /* ===================== CONFIG ===================== */
 
+#define BLOCK_DATA_BYTES 52
 #define RX_BUF_SIZE (1 << 24)   /* 16 MB */
 
-#define BLOCK_FIFO_LEN   1024
+#define BLOCK_FIFO_LEN   (1024*256)
 
-#define ADC_FIFO_LEN     64
+#define ADC_FIFO_LEN     (64*64)
 #define ADC_PACKET_BYTES 4096
 #define ADC_SAMPLES_PER_PACKET (ADC_PACKET_BYTES / 2)
 
@@ -23,7 +25,7 @@ extern "C" {
 typedef struct ddsli_ctx ddsli_ctx_t;
 
 /* Parsed DDS / lock-in block */
-typedef struct {
+typedef struct __attribute__((packed)) {
     uint64_t phase;
     uint64_t phase_inc;
     uint64_t phase_inc_delta;
@@ -44,7 +46,7 @@ typedef struct {
  * @param baud  Baud rate (termios speed constant, e.g. B115200)
  * @return      Context pointer or NULL on failure
  */
-ddsli_ctx_t *ddsli_open(const char *port, int baud);
+ddsli_ctx_t *ddsli_open(const char *port, speed_t baud);
 
 /**
  * Close device and free all resources.
@@ -83,7 +85,14 @@ int ddsli_read_adc_packet(ddsli_ctx_t *ctx, uint16_t *out);
  *
  * @return write() return value
  */
-int ddsli_toggle_out_strem(ddsli_ctx_t *ctx);
+int ddsli_toggle_out_stream(ddsli_ctx_t *ctx);
+
+/**
+ * Send arbitrary command to the device.
+ *
+ * @return write() return value
+ */
+int ddsli_send_cmd(ddsli_ctx_t *ctx, char *str, uint32_t strlen);
 
 #ifdef __cplusplus
 }

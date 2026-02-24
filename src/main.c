@@ -306,25 +306,20 @@ void print_output_packet(void)
 {
     uint32_t dcnt = 0;
     ddsli_output_t obuf;
-    uint8_t header[4] = {0x55,0x55,0x55,0x20};
-    usbserial_send_tx(header, 4);
+    // uint8_t header[4] = {0x55,0x55,0x55,0x20};
+    // usbserial_send_tx(header, 4);
 
     while (dcnt < 16)
     {
         while (ddsli_output_pop(&obuf))
         {
-            if (dcnt) {
-                uint8_t sep = 0x77;
-                usbserial_send_tx(&sep, 1);
-            }
-            usbserial_send_tx(
-                (uint8_t *)&obuf, sizeof(obuf));
+            uint8_t header[4] = {0x55,0x55,0x55,0x20};
+            usbserial_send_tx(header, 4);
+            usbserial_send_tx((uint8_t *)&obuf, sizeof(obuf));
             dcnt++;
             if (dcnt >= 64) break;
         }
     }
-    uint8_t sep = 0xAA;
-    usbserial_send_tx(&sep, 1);
 }
 
 void print_legible_demod(void)

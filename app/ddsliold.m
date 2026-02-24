@@ -46,8 +46,10 @@ function [packets, remaining] = extract_packets(buffer)
     % Headers: 0x55 0x55 0x55 {0x00,0x10,0x20}
     % Terminator: 0xAA
     % Blocks: 52 bytes, separated by 0x77 (for type 0x20)
-
-    packets = {};
+    
+    max_blocks = floor(2000000 / (4 + 56));
+    packets = cell(1, max_blocks);
+    pkt_idx = 0;
     buffer = uint8(buffer(:).'); % row vector
     pos = 1;
     buflen = length(buffer);
@@ -92,7 +94,9 @@ function [packets, remaining] = extract_packets(buffer)
                 endif
 
                 newpacket = typecast(buffer(start:cursor + expected_len),'uint16');
-                packets{end + 1} = [newpacket(3:2:end) newpacket(4:2:end)];
+                pkt_idx += 1;
+                packets{pkt_idx} = [newpacket(3:2:end) newpacket(4:2:end)];
+                % packets{end + 1} = [newpacket(3:2:end) newpacket(4:2:end)];
                 pos = cursor + expected_len + 1;
 
             case 0x10
@@ -104,75 +108,52 @@ function [packets, remaining] = extract_packets(buffer)
                     break; % incomplete packet
                 endif
 
-                packets{end + 1} = buffer(start:cursor + expected_len);
+                pkt_idx += 1;
+                packets{pkt_idx} = buffer(start:cursor + expected_len);
                 pos = cursor + expected_len + 1;
 
             case 0x20
-                % disp("LI data received.")
+                % === DDSLI block: fixed single 56-byte payload ===
+
                 block_start = cursor;
+                block_end   = block_start + 56 - 1;
 
-                break_loop = false;
-                while true
-                    % Check if full 56-byte block + next byte exists
-                    if block_start + 56 - 1 > buflen
-                        % Incomplete block → wait for more data
-                        break_loop = true;
-                        break;
-                    endif
-
-                    block_end = block_start + 56 - 1;
-                    next_byte_pos = block_end + 1;
-
-                    % If next byte doesn't exist yet → incomplete
-                    if next_byte_pos > buflen
-                        break_loop = true;
-                        break;
-                    endif
-
-                    next_byte = buffer(next_byte_pos);
-
-                    % Only accept 0x77 or 0xAA as next byte
-                    if next_byte ~= 0x77 && next_byte ~= 0xAA
-                        % Invalid packet → discard first byte after header and resync
-                        pos = start;
-                        break_loop = true;
-                        break;
-                    endif
-
-                    % Valid 56-byte block → parse
-                    packets{end + 1} = parse_ddsli_block(buffer(block_start:block_end));
-
-                    if next_byte == 0x77
-                        block_start = next_byte_pos + 1; % move to next block
-                    else
-                        % next_byte == 0xAA → end of packet
-                        pos = next_byte_pos + 1;
-                        break_loop = true;
-                        break;
-                    endif
-                endwhile
-
-                if break_loop == 1
+                % Check if full block is available
+                if block_end > buflen
+                    % Incomplete packet → wait for more data
                     break;
                 endif
 
+                % Parse exactly one block
+                pkt_idx += 1;
+                packets{pkt_idx} = parse_ddsli_block(buffer(block_start:block_end));
+
+                % Advance position past this packet
+                pos = block_end + 1;
         endswitch
-
     endwhile
-
     remaining = buffer(pos:end);
 endfunction
 
 [~, serialfname] = system('echo -n /dev/ttyACM*');
 ser = serialport(serialfname, 'timeout', 0.001);
 
-x=[];
+CAPTURE_BYTES = 2000000;
+x = zeros(1, CAPTURE_BYTES, 'uint8');
+
 disp('Capturing...')
 write(ser,'cp');
+
+idx = 1;
 tic();
-while length(x) < 2000000
+while idx <= CAPTURE_BYTES
     pause(0.01);
-    x=[x read(ser,10000)];
+    new = read(ser, min(10000, CAPTURE_BYTES - idx + 1));
+    n = numel(new);
+    if n > 0
+        x(idx:idx+n-1) = new;
+        idx += n;
+    endif
 endwhile
 toc();
 
@@ -180,23 +161,20 @@ write(ser,'cp');
 
 disp('Processing...')
 tic();
-[a,b]=extract_packets(x);
-as = [a];
-
-while !isempty(b)
-    [a,b]=extract_packets(b);
-    as = [as a];
-endwhile
+[as, ~] = extract_packets(x);
+toc();
 toc();
 
-fs = As = [];
-for i = 1:length(as)
-    fs(i) = double(as{1}.frequency.phase_inc)/2^64*1e6;
-    vs(i) = as{i}.chA(1);
-endfor
+N = numel(as);
 
-for i = 1:length(as)
-phs(i) = angle(as{i}.chB(1) + 1i*as{i}.chB(2));
+fs  = zeros(1, N);
+vs  = zeros(1, N);
+phs = zeros(1, N);
+
+for i = 1:N
+    fs(i)  = double(as{i}.frequency.phase_inc) / 2^64 * 1e6;
+    vs(i)  = as{i}.chA(1);
+    phs(i) = angle(as{i}.chB(1) + 1i*as{i}.chB(2));
 endfor
 
 figure(1);
@@ -206,7 +184,8 @@ plot(vs);
 figure(3);
 plot(phs);
 
-% pkg load signal  % for plotting and real-time updates
+% pkg load signal 
+% for plotting and real-time updates (not working, too slow processing)
 
 % % === Initialize plots ===
 % figure(1);

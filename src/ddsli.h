@@ -48,7 +48,7 @@ typedef struct {
 } ddsli_out_ctrl_t;
 
 /* Demodulated output sample */
-typedef struct {
+typedef struct __attribute__((packed)) {
     ddsli_phase_ctrl_t frequency;   /* Phase state associated with this output */
     ddsli_out_ctrl_t   ddsli_amplitude;
     float              chA[3];      /* I, Q, DC */

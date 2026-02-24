@@ -715,6 +715,10 @@ static inline void ddsli_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sinc
     lpf_fifo[lpf_fifo_wr].chB[2] = out.chB[2];
 
     lpf_fifo_wr = next_wr;
+    if(lpf_fifo_rd == lpf_fifo_wr)
+    {
+        lpf_fifo_rd = (lpf_fifo_rd + 1) % LPF_FIFO_LEN;
+    }
     cm_enable_interrupts();
 }
 
