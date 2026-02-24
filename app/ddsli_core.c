@@ -244,6 +244,11 @@ static int serial_open(const char *port, int baud)
     cfmakeraw(&t);
     cfsetspeed(&t, baud);
     t.c_cflag |= CLOCAL | CREAD;
+    
+    // Set VTIME to 1 decisecond (100ms) timeout
+    t.c_cc[VTIME] = 1;  // 100ms timeout
+    t.c_cc[VMIN] = 0;    // Non-blocking read
+    
     tcsetattr(fd, TCSANOW, &t);
 
     return fd;
