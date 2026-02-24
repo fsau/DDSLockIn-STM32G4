@@ -2,11 +2,24 @@
 % Controls DDSLI device with frequency sweep functionality
 
 % Configuration variables
-initial_freq_a = 33790000; # mHz
-initial_freq_b = 33760000; 
-final_freq_a = 33760000;
-final_freq_b = 33790000;
-sweep_time = 5;             % Sweep duration in seconds
+initial_meas_freq_a = 33760000; # mHz
+initial_meas_freq_b = 33760000; 
+final_meas_freq_a = 33790000;
+final_meas_freq_b = 33790000;
+sweep_meas_time = 10;
+sweep_pre_time = 1;
+
+% Update sweep frequencies ranges for including pre-measure time
+
+sweep_time = sweep_meas_time + sweep_pre_time;
+sweep_delta_a = final_meas_freq_a - initial_meas_freq_a;
+sweep_delta_b = final_meas_freq_b - initial_meas_freq_b;
+sweep_inactive_ratio = (sweep_pre_time/sweep_time);
+
+initial_freq_a = initial_meas_freq_a - sweep_delta_a * sweep_inactive_ratio;
+initial_freq_b = initial_meas_freq_b - sweep_delta_b * sweep_inactive_ratio;
+final_freq_a = final_meas_freq_a;
+final_freq_b = final_meas_freq_b;
 
 % Calculate sweep rates (Hz/s * 2^32)
 % Sweep rate = (final_freq - initial_freq) / sweep_time
@@ -27,9 +40,11 @@ cmd = sprintf("####f%daf%dbf%dqf%dgu####",
 
 printf("Sending command: %s\n", cmd);
 ret = ddsli_send_cmd(cmd);
+pause(0.1);
 
 printf("Starting output stream...\n");
 ddsli_toggle_out_stream();
+ddsli_read_blocks_matrix();  # clear buffer
 
 printf("Waiting %.1f seconds for sweep...\n", sweep_time);
 pause(sweep_time);
@@ -41,3 +56,8 @@ printf("Reading data blocks...\n");
 blocks = ddsli_read_blocks_matrix();
 
 ddsli_close();
+
+figure(1)
+plot(blocks.chA');
+figure(2)
+plot(blocks.chB');
