@@ -14,13 +14,13 @@
 /* ===================== FIFO TYPES ===================== */
 
 typedef struct {
-    ddsli_block_t buf[BLOCK_FIFO_LEN];
-    size_t rd, wr, count;
+    ddsli_block_t *buf;
+    size_t rd, wr, count, cap;
 } block_fifo_t;
 
 typedef struct {
-    uint16_t buf[ADC_FIFO_LEN][ADC_SAMPLES_PER_PACKET];
-    size_t rd, wr, count;
+    uint16_t (*buf)[ADC_SAMPLES_PER_PACKET];
+    size_t rd, wr, count, cap;
 } adc_fifo_t;
 
 /* ===================== CONTEXT ===================== */
@@ -41,18 +41,35 @@ struct ddsli_ctx {
 
 /* ===================== FIFO HELPERS ===================== */
 
+static int block_fifo_grow(block_fifo_t *f)
+{
+    size_t new_cap = f->cap ? f->cap * 2 : BLOCK_FIFO_LEN;
+    ddsli_block_t *n = malloc(new_cap * sizeof(*n));
+    if (!n)
+        return 0;
+
+    for (size_t i = 0; i < f->count; i++)
+        n[i] = f->buf[(f->rd + i) % f->cap];
+
+    free(f->buf);
+    f->buf = n;
+    f->cap = new_cap;
+    f->rd = 0;
+    f->wr = f->count;
+    return 1;
+}
+
 static void block_fifo_push(ddsli_ctx_t *c, const ddsli_block_t *b)
 {
-    if (c->block_fifo.count == BLOCK_FIFO_LEN)
-        return;
-
-    // fprintf(stderr,
-    //     "FIFO PUSH idx=%zu phase=%llu\n",
-    //     c->block_fifo.wr,
-    //     (unsigned long long)b->phase);
+    if (c->block_fifo.count == c->block_fifo.cap)
+        if (!block_fifo_grow(&c->block_fifo)) {
+            static int warned;
+            if (!warned++) printf("BLOCK FIFO grow failed\n");
+            return;
+        }
 
     c->block_fifo.buf[c->block_fifo.wr] = *b;
-    c->block_fifo.wr = (c->block_fifo.wr + 1) % BLOCK_FIFO_LEN;
+    c->block_fifo.wr = (c->block_fifo.wr + 1) % c->block_fifo.cap;
     c->block_fifo.count++;
 }
 
@@ -61,25 +78,44 @@ static int block_fifo_pop(ddsli_ctx_t *c, ddsli_block_t *out)
     if (!c->block_fifo.count)
         return 0;
 
-    // fprintf(stderr,
-    //     "FIFO POP idx=%zu phase=%llu\n",
-    //     c->block_fifo.rd,
-    //     (unsigned long long)out->phase);
-
     *out = c->block_fifo.buf[c->block_fifo.rd];
-    c->block_fifo.rd = (c->block_fifo.rd + 1) % BLOCK_FIFO_LEN;
+    c->block_fifo.rd = (c->block_fifo.rd + 1) % c->block_fifo.cap;
     c->block_fifo.count--;
+    return 1;
+}
 
+static int adc_fifo_grow(adc_fifo_t *f)
+{
+    size_t new_cap = f->cap ? f->cap * 2 : ADC_FIFO_LEN;
+    uint16_t (*n)[ADC_SAMPLES_PER_PACKET] =
+        malloc(new_cap * sizeof(*n));
+    if (!n)
+        return 0;
+
+    for (size_t i = 0; i < f->count; i++)
+        memcpy(n[i],
+               f->buf[(f->rd + i) % f->cap],
+               ADC_PACKET_BYTES);
+
+    free(f->buf);
+    f->buf = n;
+    f->cap = new_cap;
+    f->rd = 0;
+    f->wr = f->count;
     return 1;
 }
 
 static void adc_fifo_push(ddsli_ctx_t *c, const uint8_t *raw)
 {
-    if (c->adc_fifo.count == ADC_FIFO_LEN)
-        return;
-    // fprintf(stderr,"ADC FIFO PUSH. id=%ld\n", c->adc_fifo.wr);
-    memcpy(c->adc_fifo.buf[c->adc_fifo.wr], raw, ADC_PACKET_BYTES);
-    c->adc_fifo.wr = (c->adc_fifo.wr + 1) % ADC_FIFO_LEN;
+    if (c->adc_fifo.count == c->adc_fifo.cap)
+        if (!adc_fifo_grow(&c->adc_fifo))
+            return;
+
+    memcpy(c->adc_fifo.buf[c->adc_fifo.wr],
+           raw,
+           ADC_PACKET_BYTES);
+
+    c->adc_fifo.wr = (c->adc_fifo.wr + 1) % c->adc_fifo.cap;
     c->adc_fifo.count++;
 }
 
@@ -88,12 +124,11 @@ static int adc_fifo_pop(ddsli_ctx_t *c, uint16_t *out)
     if (!c->adc_fifo.count)
         return 0;
 
-    // fprintf(stderr,"ADC FIFO POP. id=%ld\n", c->adc_fifo.rd);
     memcpy(out,
            c->adc_fifo.buf[c->adc_fifo.rd],
            ADC_PACKET_BYTES);
 
-    c->adc_fifo.rd = (c->adc_fifo.rd + 1) % ADC_FIFO_LEN;
+    c->adc_fifo.rd = (c->adc_fifo.rd + 1) % c->adc_fifo.cap;
     c->adc_fifo.count--;
     return 1;
 }
@@ -276,10 +311,25 @@ ddsli_ctx_t *ddsli_open(const char *port, speed_t baud)
         return NULL;
     }
 
+    ctx->block_fifo.cap = BLOCK_FIFO_LEN;
+    ctx->adc_fifo.cap   = ADC_FIFO_LEN;
+
+    ctx->block_fifo.buf = malloc(BLOCK_FIFO_LEN * sizeof(ddsli_block_t));
+    ctx->adc_fifo.buf   = malloc(ADC_FIFO_LEN * sizeof(*ctx->adc_fifo.buf));
+
+    if (!ctx->block_fifo.buf || !ctx->adc_fifo.buf) {
+        free(ctx->block_fifo.buf);
+        free(ctx->adc_fifo.buf);
+        free(ctx);
+        return NULL;
+    }
+
     ctx->fd = serial_open(port, baud);
     free(auto_port);
 
     if (ctx->fd < 0) {
+        free(ctx->block_fifo.buf);
+        free(ctx->adc_fifo.buf);
         free(ctx);
         return NULL;
     }
@@ -291,6 +341,8 @@ ddsli_ctx_t *ddsli_open(const char *port, speed_t baud)
                        rx_thread_fn, ctx) != 0) {
         close(ctx->fd);
         pthread_mutex_destroy(&ctx->lock);
+        free(ctx->block_fifo.buf);
+        free(ctx->adc_fifo.buf);
         free(ctx);
         return NULL;
     }
@@ -304,12 +356,12 @@ void ddsli_close(ddsli_ctx_t *ctx)
         return;
 
     atomic_store(&ctx->running, 0);
-
     close(ctx->fd);
-
     pthread_join(ctx->rx_thread, NULL);
 
     pthread_mutex_destroy(&ctx->lock);
+    free(ctx->block_fifo.buf);
+    free(ctx->adc_fifo.buf);
     free(ctx);
 }
 
