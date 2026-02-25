@@ -1,5 +1,8 @@
 # Project specifics:
 
+*.png
+*
+!*.*
 .history/
 .vscode/
 build/
