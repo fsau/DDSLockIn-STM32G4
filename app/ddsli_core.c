@@ -376,3 +376,14 @@ int ddsli_send_cmd(ddsli_ctx_t *ctx, char *str, uint32_t strlen)
 {
     return write(ctx->fd, str, strlen);
 }
+
+/*
+ * Missing:
+ * - Frequency/sweep adjust: A/B/both (simultaneous)
+ * - Adjust frequency/sweep with int64: backend
+ * - Amplitude adjust (missing in back too)
+ * - PLL (also)
+ * - Toggle channel B: independent, 90° or off (yep)
+
+
+*/

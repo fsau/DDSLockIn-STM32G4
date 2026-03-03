@@ -17,6 +17,55 @@
 #include "timers.h"
 #include "utils.h"
 
+/*
+ * TODO:
+ * - Adjust frequency/sweep with int64
+ * - Amplitude adjust, ramp control
+ * - Toggle channel B: independent, 90° or off
+ * - Routines: PLL and Sweep
+ * 
+ * Frequency control (per dds):
+ *   PLL vars:
+ *   - input source (ch): a, b
+ *   - phase setpoint
+ *   - f_min, f_max, f_init
+ *   - tau/filtering
+ *   - at f_max/min: limit/wrap/reset to f_init
+ *   
+ *   Sweep vars:
+ *   - f_min, f_max
+ *   - rate
+ *   - direction: up, down, both/toggle
+ *   - trigger: single, continuous
+ *   - start: null/turn on output
+ *   - stop: null/turn off output
+ *   - initial wait time
+ *   - output in wait time: null/on/off
+ *   - control packet output
+ *   
+ *   Slave mode vars:
+ *   - mult
+ *   - div
+ *   - delta
+ * 
+ * Amplitude control (per dds):
+ * - internal: current, setpoint, rate
+ * - auto ctrl:
+ *   - input source (ch): a, b, Z*a*b, other?
+ *   - min / max amplitudes
+ *   - ctrl type: PI / minmax
+ *   - ctrl value: setpoint / limits
+ *   - ctrl coeffs
+ * 
+ * LI output control (both output ch):
+ * - channel/ref selection: 00 01 10 11 a/b
+ * - samples #/continuous
+ * - f_min, f_max
+ * - average samples #
+ * - LPF coeffs
+ * - decimate #
+*/
+
 typedef enum {
     CMD_ACT_NONE = 0,
     CMD_ACT_SET_FREQ,
