@@ -31,7 +31,7 @@ void update_pll(pll_instance *pll, ddsli_output_t out, ddsli_phase_ctrl_t *dds)
     {
         dds->phase_inc_delta = pll->conf.tau*phase_error;
     }
-    else
+    else if(phase_error != 0)
     {
         dds->phase_inc_delta = 0;
 
@@ -46,5 +46,9 @@ void update_pll(pll_instance *pll, ddsli_output_t out, ddsli_phase_ctrl_t *dds)
             dds->phase_inc = pll->conf.f_init;
             break;
         }
+    }
+    else
+    {
+        dds->phase_inc_delta = 0;
     }
 }
