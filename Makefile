@@ -52,7 +52,7 @@ libopencm3:
 		git submodule init; \
 		git submodule update; \
 	fi
-	$(MAKE) -C libopencm3 lib/stm32/f1
+	$(MAKE) -C libopencm3 lib/stm32/g4
 
 clean:
 	-rm -r build
