@@ -1,7 +1,14 @@
 # Project specifics:
 
-# *
-# !*.*
+# Ignore everything
+*
+
+# Re-include directories so Git can recurse
+!*/
+
+# Re-include files that contain at least one dot
+!*.* 
+
 *.png
 .history/
 .vscode/
