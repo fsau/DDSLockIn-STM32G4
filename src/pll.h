@@ -12,17 +12,18 @@ typedef enum
 typedef struct 
 {
     uint8_t source;
-    uint32_t phase_sp;
-    uint64_t f_min;
-    uint64_t f_max;
-    uint32_t tau;
+    float phase_sp;
+    ddsli_phase_inc_t f_min;
+    ddsli_phase_inc_t f_max;
+    ddsli_phase_inc_t f_init;
+    float tau;
     pll_max_act max_act; 
 } pll_config;
 
 typedef struct
 {
     pll_config conf;
-    uint64_t curr_f;
+    // uint64_t curr_f;
 } pll_instance;
 
-void update_pll(ddsli_output_t out, ddsli_phase_ctrl_t *f_ctrl);
+void update_pll(pll_instance *inst, ddsli_output_t out, ddsli_phase_ctrl_t *f_ctrl);
