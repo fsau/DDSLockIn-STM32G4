@@ -226,7 +226,7 @@
                 - Input vs reference channels (if double freq)
                 - Demod method: mix, lsr
                 - Output LPF/decimator
-     - Test running cordic in same place
+     - Test running cordic in same place/buffer
 */
 
 #include "ddsli.h"
@@ -243,41 +243,6 @@
 #include "dma_memcpy.h"
 #include "timers.h"
 #include "utils.h"
-
-// -----------------------------------------------------------------------------
-// Private type definitions
-// -----------------------------------------------------------------------------
-
-// Dual ADC sample format (STM32 dual ADC interleaved). Used for DAC too.
-typedef union
-{
-    uint32_t raw;
-    struct
-    {
-        uint16_t adc1_data; // Channel 0 (ADC1), 12-bit right-aligned
-        uint16_t adc2_data; // Channel 1 (ADC2), 12-bit right-aligned
-    };
-} dual_adc_sample_t;
-
-typedef union
-{
-    uint32_t raw;
-    struct
-    {
-        int16_t phase;
-        int16_t amp;
-    };
-} cordic_in_phase_t;
-
-typedef union
-{
-    uint32_t raw;
-    struct
-    {
-        int16_t cos;
-        int16_t sin;
-    };
-} cordic_out_sample_t;
 
 // -----------------------------------------------------------------------------
 // Buffers & globals

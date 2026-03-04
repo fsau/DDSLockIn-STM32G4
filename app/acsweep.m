@@ -1,10 +1,10 @@
 % Configuration variables
-initial_meas_freq_a = 32750000; # mHz
-initial_meas_freq_b = 32750000; 
-final_meas_freq_a = 32810000;
-final_meas_freq_b = 32810000;
-sweep_meas_time = 240;
-sweep_pre_time = 20;
+initial_meas_freq_a = 30000000; # mHz
+initial_meas_freq_b = 30000000; 
+final_meas_freq_a = 48810000;
+final_meas_freq_b = 48810000;
+sweep_meas_time = 20;
+sweep_pre_time = 2;
 
 sweep_time = sweep_meas_time + sweep_pre_time;
 sweep_delta_a = final_meas_freq_a - initial_meas_freq_a;
@@ -74,13 +74,14 @@ grid on; grid minor;
 
 figure(3)
 
-pkg load signal
+% pkg load signal
 
-QI = decimate(blocks.chA(1,:),25,4);
-QQ = decimate(blocks.chA(2,:),25,4);
-VI = decimate(blocks.chB(1,:),25,4);
-VQ = decimate(blocks.chB(2,:),25,4);
-fsd = fs(1:25:end);
+QI = blocks.chA(1,:);
+QQ = blocks.chA(2,:);
+VI = blocks.chB(1,:);
+VQ = blocks.chB(2,:);
+% fsd = fs(1:25:end);
+fsd = fs;
 Q = movmean(QI+1i*QQ,200);
 V = movmean(VI+1i*VQ,200);
 C = 10.5e-12;

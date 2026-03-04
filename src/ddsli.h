@@ -55,6 +55,37 @@ typedef struct __attribute__((packed)) {
     float              chB[3];      /* I, Q, DC */
 } ddsli_output_t;
 
+// Dual ADC sample format (STM32 dual ADC interleaved). Used for DAC too.
+typedef union
+{
+    uint32_t raw;
+    struct
+    {
+        uint16_t adc1_data; // Channel 0 (ADC1), 12-bit right-aligned
+        uint16_t adc2_data; // Channel 1 (ADC2), 12-bit right-aligned
+    };
+} dual_adc_sample_t;
+
+typedef union
+{
+    uint32_t raw;
+    struct
+    {
+        int16_t phase;
+        int16_t amp;
+    };
+} cordic_in_phase_t;
+
+typedef union
+{
+    uint32_t raw;
+    struct
+    {
+        int16_t cos;
+        int16_t sin;
+    };
+} cordic_out_sample_t;
+
 /* --------------------------------------------------------------------------
  * Buffer sizing
  * -------------------------------------------------------------------------- */
