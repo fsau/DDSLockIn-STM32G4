@@ -242,6 +242,7 @@
 #include "dac.h"
 #include "dma_memcpy.h"
 #include "timers.h"
+// #include "pll.h"
 #include "utils.h"
 
 // -----------------------------------------------------------------------------
@@ -279,6 +280,8 @@ ddsli_out_ctrl_t ddsli_linear_comb = {
     // .B2 = 0x7FFF,
     // .output_scale = 1
 };
+
+// pll_instance plli[DDS_GEN_INSTANCES]; // use output callback instead
 
 volatile ddsli_phase_ctrl_t phase_dds, phase_ddsB;
 volatile int *adc_half_flag_ptr = NULL;
