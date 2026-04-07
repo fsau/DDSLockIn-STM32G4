@@ -20,12 +20,12 @@ void adc_dac_timer_init(void)
     timer_set_master_mode(TIM4, TIM_CR2_MMS_UPDATE);
     timer_enable_preload(TIM4);
 
-    // gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO9);
-    // gpio_set_output_options(GPIOB,
-    //                         GPIO_OTYPE_PP,
-    //                         GPIO_OSPEED_2MHZ,
-    //                         GPIO9);
-    // gpio_set_af(GPIOB, GPIO_AF2, GPIO9); // Debug output
+    gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO9);
+    gpio_set_output_options(GPIOB,
+                            GPIO_OTYPE_PP,
+                            GPIO_OSPEED_2MHZ,
+                            GPIO9);
+    gpio_set_af(GPIOB, GPIO_AF2, GPIO9); // Debug output
     timer_set_oc_mode(TIM4, TIM_OC4, TIM_OCM_PWM1);
     timer_set_oc_value(TIM4, TIM_OC4, arr / 2); // 50% duty
     timer_enable_oc_output(TIM4, TIM_OC4); // Used as DAC DMA trigger
@@ -38,17 +38,17 @@ void adc_dac_timer_init(void)
     timer_slave_set_trigger(TIM3, TIM_SMCR_TS_ITR3);
     timer_enable_preload(TIM3);
 
-    // gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO0);
-    // gpio_set_output_options(GPIOB,
-    //                         GPIO_OTYPE_PP,
-    //                         GPIO_OSPEED_2MHZ,
-    //                         GPIO0);
-    // gpio_set_af(GPIOB, GPIO_AF2, GPIO0);
-    // timer_set_oc_mode(TIM3, TIM_OC3, TIM_OCM_PWM1);
+    gpio_mode_setup(GPIOB, GPIO_MODE_AF, GPIO_PUPD_NONE, GPIO0);
+    gpio_set_output_options(GPIOB,
+                            GPIO_OTYPE_PP,
+                            GPIO_OSPEED_2MHZ,
+                            GPIO0);
+    gpio_set_af(GPIOB, GPIO_AF2, GPIO0);
+    timer_set_oc_mode(TIM3, TIM_OC3, TIM_OCM_PWM1);
     timer_set_oc_mode(TIM3, TIM_OC4, TIM_OCM_PWM1);
-    // timer_set_oc_value(TIM3, TIM_OC3, arr / 2); // Debug PWM duty
+    timer_set_oc_value(TIM3, TIM_OC3, arr / 2); // Debug PWM duty
     timer_set_oc_value(TIM3, TIM_OC4, arr / 2); // Tune ADC timing here
-    // timer_enable_oc_output(TIM3, TIM_OC3); // Debug PWM output
+    timer_enable_oc_output(TIM3, TIM_OC3); // Debug PWM output
     timer_enable_oc_output(TIM3, TIM_OC4); // ADC trigger
 }
 

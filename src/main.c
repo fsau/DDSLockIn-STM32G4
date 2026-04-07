@@ -15,6 +15,7 @@
 #include "dac.h"
 #include "ddsli.h"
 #include "timers.h"
+#include "i2c.h"
 #include "utils.h"
 
 /*
@@ -82,7 +83,8 @@ typedef enum {
     CMD_ACT_ADJUST_FB,
     CMD_ACT_ADJUST_SWA,
     CMD_ACT_ADJUST_SWB,
-    CMD_ACT_TOGGLE_ECHO
+    CMD_ACT_TOGGLE_ECHO,
+    CMD_ACT_RH_MEAS
 } cmd_action_t;
 
 typedef enum {
@@ -125,6 +127,7 @@ int main(void)
 
     usbserial_init(); // Communications
     ddsli_setup(); // Everything else
+    i2c_init();
 
     for (uint32_t i = 0; i < 1000000; i += 1)
         __asm__("nop");
@@ -223,6 +226,43 @@ int main(void)
             case CMD_ACT_TOGGLE_ECHO:
                 echo_serial = !echo_serial;
                 break;
+
+            case CMD_ACT_RH_MEAS:
+                char s1[] = "Sensor 1: ";
+                char s2[] = "Sensor 2: ";
+                uint8_t data[6] = {0x7C,0xA2,0,0,0,0};
+                i2c_write(0x70, data, 2);
+                delay_ms(150);
+                i2c_read(0x70, data, 6);
+
+                float f,h;
+                f = -45.0 + 175.0*(data[0]*256.0+data[1])/65536;
+                h = 100.0*(data[3]*256.0+data[4])/65536;
+                char buff[30], dc[]="°C ", rh[]="%\r\n";
+                fmt_f(buff, f, 7, 3);
+                usbserial_send_tx(s1,10);
+                usbserial_send_tx(buff,6);
+                usbserial_send_tx(dc,3);
+                fmt_f(buff, h, 7, 3);
+                usbserial_send_tx(buff,6);
+                usbserial_send_tx(rh,3);
+
+                delay_ms(100);
+                data[0] = 0xFD;
+                i2c_write(0x44, data, 1);
+                delay_ms(250);
+                i2c_read(0x44, data, 6);
+
+                f = -45.0 + 175.0*(data[0]*256.0+data[1])/65535;
+                h = -6 + 125*(data[3]*256.0+data[4])/65535;
+                fmt_f(buff, f, 7, 3);
+                usbserial_send_tx(s2,10);
+                usbserial_send_tx(buff,6);
+                usbserial_send_tx(dc,3);
+                fmt_f(buff, h, 7, 3);
+                usbserial_send_tx(buff,6);
+                usbserial_send_tx(rh,3);
+                break;
             
             default:
                 break;
@@ -300,6 +340,9 @@ cmd_action_t cmd_parse_byte(cmd_parser_t *p, uint8_t c, int64_t *arg)
         }
         else if (c == 'E' || c == 'e') {
             return CMD_ACT_TOGGLE_ECHO;
+        }
+        else if (c == 'H' || c == 'h') {
+            return CMD_ACT_RH_MEAS;
         }
         break;
 
