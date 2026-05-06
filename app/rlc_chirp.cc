@@ -17,11 +17,17 @@ f_func(std::complex<double> z,
 {
     const std::complex<double> I(0.0, 1.0);
 
+    // i(t) = z(t)*exp(-i*(phase(t)-w_0*t))
+    // return ((w*w + I*dw + I*R*w/L - 2.0*w*w0 - I*R*w0/L) * z -
+    //        (R/L - 2.0 * I * w + 2.0*I*w0) * dz - I*w/L + I*w0/L);
 
-    // return ((w * w - I*dw - I*R*w/L - 2.0*w*w0 + I*R*w0/L) * z -
-    //        (R/L + 2.0 * I * w - 2.0*I*w0) * dz - I * w / L + I*w0/L);
-    return ((w * w - I*dw - I*R*w/L - 1/(C*L)) * z -
-           (R/L + 2.0 * I * w) * dz - I * w / L);
+    // i(t) = z(t)*exp(-i*phase(t))
+    return ((w * w + I*dw + I*R*w/L - 1/(C*L)) * z
+           - (R/L - 2.0 * I * w) * dz - I * w / L);
+    
+    // i(t) = z(t)*exp(i*phase(t))
+    // return ((w * w - I*dw - I*R*w/L - 1/(C*L)) * z -
+    //        (R/L + 2.0 * I * w) * dz - I * w / L);
 }
 
 /* ===================== ENTRY ===================== */
