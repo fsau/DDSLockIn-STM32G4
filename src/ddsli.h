@@ -43,8 +43,12 @@ typedef struct {
 
 /* DDS output linear combination coefficients */
 typedef struct {
-    int16_t A1;   /* sin coefficient (Q1.15) → DAC channel 1 */
-    int16_t A2;   /* sin/cos coefficient (Q1.15) → DAC channel 2 */
+    int16_t curr1;
+    int16_t curr2;
+    int16_t set1;
+    int16_t set2;
+    int16_t rate1;
+    int16_t rate2;
 } ddsli_out_ctrl_t;
 
 /* Demodulated output sample */

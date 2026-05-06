@@ -4,7 +4,7 @@
  * DDS signal generator with synchronous demodulation.
  * Continuous processing using circular buffers split into halves.
  * ADC and DAC buffers run via DMA, CPU processes completed half-buffers
- * using ISR/flags for signalling. CODIC used for calculating sine/cosine
+ * using ISR/flags for signalling. CORDIC used for calculating sine/cosine
  * in real-time.
  * The step function can be called on main or on a low priority ISR.
  *
@@ -274,9 +274,9 @@ volatile uint32_t lpf_fifo_rd = 0;
 
 // DAC output coefficients
 ddsli_out_ctrl_t ddsli_linear_comb = {
-    .A1 = 0x7FFF,
+    .curr1 = 0x7FFF,
     // .B1 = 0,
-    .A2 = 0,
+    .curr2 = 0,
     // .B2 = 0x7FFF,
     // .output_scale = 1
 };
@@ -409,15 +409,15 @@ void ddsli_set_frequency_dual(float f, float fb, float sweep, float sweepb, floa
 // -----------------------------------------------------------------------------
 
 // Process half-buffer for single DDS, quadrature output (90°)
-// A1*sin → DAC CH1, A2*cos → DAC CH2
+// curr1*sin → DAC CH1, curr2*cos → DAC CH2
 static inline void ddsli_process_dac_single90deg(
     volatile cordic_out_sample_t *sincos_src,
     volatile dual_adc_sample_t *dac_dest,
     uint32_t len,
     ddsli_out_ctrl_t *params)
 {
-    const int16_t A1 = params->A1;
-    const int16_t A2 = params->A2;
+    const int16_t A1 = params->curr1;
+    const int16_t A2 = params->curr2;
 
     for (uint32_t i = 0; i < len; i++)
     {
@@ -437,15 +437,15 @@ static inline void ddsli_process_dac_single90deg(
 }
 
 // Process half-buffer for double DDS
-// A1*sin1 → DAC CH1, A2*sin2 → DAC CH2
+// curr1*sin1 → DAC CH1, curr2*sin2 → DAC CH2
 static inline void ddsli_process_dac_double(
     volatile cordic_out_sample_t *sincos_src,
     volatile dual_adc_sample_t *dac_dest,
     uint32_t len,
     ddsli_out_ctrl_t *params)
 {
-    const int16_t A1 = params->A1;
-    const int16_t A2 = params->A2;
+    const int16_t A1 = params->curr1;
+    const int16_t A2 = params->curr2;
 
     for (uint32_t i = 0; i < len; i++)
     {
@@ -694,7 +694,7 @@ static inline void ddsli_mix_adc_halfbuffer(uint32_t adc_half_idx, uint32_t sinc
 // CORDIC Control
 // -----------------------------------------------------------------------------
 
-static inline void ddsli_codic_halfbuffer_single(uint32_t buffer_half_idx, uint32_t sincos_offset)
+static inline void ddsli_cordic_halfbuffer_single(uint32_t buffer_half_idx, uint32_t sincos_offset)
 {
     cm_disable_interrupts();
     volatile cordic_in_phase_t *src = &phase_buf[((buffer_half_idx) % 2) * HB_LEN];
@@ -712,7 +712,7 @@ cordic_in_phase_t *cordic_next_src = NULL;
 cordic_out_sample_t *cordic_next_dst = NULL;
 uint16_t cordic_next_size = 0;
 
-static inline void ddsli_codic_halfbuffer_double(uint32_t buffer_half_idx, uint32_t sincos_offset)
+static inline void ddsli_cordic_halfbuffer_double(uint32_t buffer_half_idx, uint32_t sincos_offset)
 {
     cm_disable_interrupts();
     volatile cordic_in_phase_t *src = &phase_buf[((buffer_half_idx) % 2) * HB_LEN];
@@ -734,7 +734,7 @@ static inline void ddsli_codic_halfbuffer_double(uint32_t buffer_half_idx, uint3
     cm_enable_interrupts();
 }
 
-static inline bool ddsli_codic_pending(void)
+static inline bool ddsli_cordic_pending(void)
 {
     cm_disable_interrupts();
     if ((cordic_next_src != NULL) && (cordic_next_dst != NULL) && cordic_next_size)
@@ -871,14 +871,14 @@ void ddsli_setup(void)
 
     ddsli_current_half = 0;
 
-    ddsli_codic_halfbuffer_double(0, 0);
+    ddsli_cordic_halfbuffer_double(0, 0);
     // Blocking wait for CORDIC completion only
     while (*cordic_busy_flag_ptr)
     {
         __asm__("nop");
     }
 
-    ddsli_codic_halfbuffer_double(1, 1);
+    ddsli_cordic_halfbuffer_double(1, 1);
     ddsli_generate_phase_halfbuffer_idx(0);
     while (*cordic_busy_flag_ptr)
     {
@@ -923,7 +923,7 @@ int8_t ddsli_step(void)
     {
         (*cordic_done_flag_ptr)--;
 
-        if (!ddsli_codic_pending())
+        if (!ddsli_cordic_pending())
         {
             cm_enable_interrupts();
             ddsli_process_dac_halfbuffer(buffers_half, sincos_thirds);
@@ -959,7 +959,7 @@ int8_t ddsli_step(void)
 
     cm_enable_interrupts();
 
-    ddsli_codic_halfbuffer_double(buffers_half, sincos_thirds);
+    ddsli_cordic_halfbuffer_double(buffers_half, sincos_thirds);
     ddsli_generate_phase_halfbuffer_idx(!buffers_half);
 
     cm_disable_interrupts();
@@ -969,7 +969,7 @@ int8_t ddsli_step(void)
         (*cordic_done_flag_ptr)--;
 
         cm_enable_interrupts();
-        if (!ddsli_codic_pending())
+        if (!ddsli_cordic_pending())
         {
             // This should not happen on double mode, but if it does...
             ddsli_mix_adc_halfbuffer(buffers_half, (sincos_thirds + 1) % SINCOS_BUFF_HALVES);
