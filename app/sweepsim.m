@@ -61,41 +61,6 @@ plot(t,[real(z),imag(z)]);
 legend('Real','Imag');
 grid on; grid minor;
 
-% figure(2);
-
-% ti = find(abs(dz)>0.8*max(abs(dz)),1);
-% tfi = find(abs(dz(ti:end))<1.3*min(abs(dz(ti:end))),1) + ti - 1;
-% plotyy(w(ti:tfi)/2/pi,abs((dz(ti:tfi))),
-%        w(ti:tfi)/2/pi,unwrap(angle((dz(ti:tfi)))),@semilogy,@plot);
-% grid on; grid minor;
-
-% pf = polyfit(w((ti):(tfi))/2/pi-w(1)/2/pi,unwrap(angle((dz((ti):tfi)))),2);
-% f_meas = -pf(2)/(2*pf(1))+w(1)/2/pi;
-% disp([f_meas, w0/2/pi])
-
-% [~,i_res] = min(abs(w-2*pi*f_meas));
-% t_res = t(i_res);
-
-% tppk = find(abs(dz(ti:end)) < 0.2*max(abs(dz(ti:end))),1) + ti - 1;
-% tef = find(abs(dz(ti:end)) < 0.05*max(abs(dz(ti:end))),1) + ti - 1;
-% if isempty(tef)
-%     tef = length(dz);
-% endif
-
-% wd = w - w(i_res) - 2*pi*f_meas*(t-t_res);
-% pa = polyfit((t(tppk:tef)-t_res),log(abs((dz(tppk:tef)))./abs(wd(tppk:tef))),1);
-% figure(3);
-% plot((t(tppk:tef)-t_res),log(abs((dz(tppk:tef)))./abs(wd(tppk:tef))));
-% grid on; grid minor;
-
-% % plot((t(ti:tfi)-t_res),log(abs((dz(ti:tfi)))./abs(wd(ti:tfi))));
-% % plot((t-t_res),log(abs((dz))));
-
-% k = pa(1);
-% A = exp(pa(2));
-% Q_meas = 2*pi*f_meas/(-2*k);
-% disp([Q_meas Q]);
-
 te = linspace(-tm/2,tm*1.5,2*length(t));
 
 deswept = conv(z,exp(-0.5i*dw*(te-tm/2).^2),"same");
