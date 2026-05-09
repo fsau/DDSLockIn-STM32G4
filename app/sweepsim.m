@@ -1,16 +1,26 @@
 pkg load signal
 
 % % # Parameters
-L = 6740.02;
-C = 3.5e-15;
-R = 80e3;
-C0 = 12e-12;
+
+% L = 6740.02;
+% C = 3.5e-15;
+% R = 80e3;
+
+C0 = 1.75e-12;
+
+omega0 = 2*pi*32800; % 1/sqrt(L*C)
+Z_0      = 1.2e9; % sqrt(L/C)
+Q_factor = 1e3; % w_0*L/R
+
+L = Z_0 / omega0;
+C = 1 / (omega0 * Z_0);
+R = Z_0 / Q_factor;
 
 dt = 1e-6;
-tm = 2;
+tm = 0.1;
 
-f0 = 32750;
-ff = 32820;
+ff = 31000;
+f0 = 34000;
 t = (0:dt:tm)';
 w = 2*pi*linspace(f0,ff,length(t));
 dw = 2*pi*(ff - f0)/tm;
@@ -22,7 +32,7 @@ tic
 [z,dz] = rlc_chirp(dt,tm,f0,ff,L,R,C,C0);
 toc
 
-z=z*1i;
+% z=z*1i;
 
 function y = blockmean(x, N)
     x = x(:);  % make column
@@ -36,51 +46,69 @@ function y = blockmean(x, N)
     y = y.';  % return as column (optional)
 end
 
-% z = z + rand(size(z))*1e-6.*exp(1i*rand(size(z))*2*pi);
+z = z + randn(size(z))*1e-8.*exp(1i*rand(size(z))*2*pi);
 % dz = dz + rand(size(dz))*1e-6.*exp(1i*rand(size(dz))*2*pi)/dt;
 
 z = blockmean(z,256);
-dz = blockmean(dz,256);
+% dz = blockmean(dz,256);
 t = blockmean(t,256);
 w = blockmean(w,256);
+
+z = z - 1i*imag(median(z.*w)/median(w));
 
 figure(1);
 plot(t,[real(z),imag(z)]);
 legend('Real','Imag');
 grid on; grid minor;
 
-figure(2);
+% figure(2);
 
-ti = find(abs(dz)>0.8*max(abs(dz)),1);
-tfi = find(abs(dz(ti:end))<1.3*min(abs(dz(ti:end))),1) + ti - 1;
-plotyy(w(ti:tfi)/2/pi,abs((dz(ti:tfi))),
-       w(ti:tfi)/2/pi,unwrap(angle((dz(ti:tfi)))),@semilogy,@plot);
+% ti = find(abs(dz)>0.8*max(abs(dz)),1);
+% tfi = find(abs(dz(ti:end))<1.3*min(abs(dz(ti:end))),1) + ti - 1;
+% plotyy(w(ti:tfi)/2/pi,abs((dz(ti:tfi))),
+%        w(ti:tfi)/2/pi,unwrap(angle((dz(ti:tfi)))),@semilogy,@plot);
+% grid on; grid minor;
+
+% pf = polyfit(w((ti):(tfi))/2/pi-w(1)/2/pi,unwrap(angle((dz((ti):tfi)))),2);
+% f_meas = -pf(2)/(2*pf(1))+w(1)/2/pi;
+% disp([f_meas, w0/2/pi])
+
+% [~,i_res] = min(abs(w-2*pi*f_meas));
+% t_res = t(i_res);
+
+% tppk = find(abs(dz(ti:end)) < 0.2*max(abs(dz(ti:end))),1) + ti - 1;
+% tef = find(abs(dz(ti:end)) < 0.05*max(abs(dz(ti:end))),1) + ti - 1;
+% if isempty(tef)
+%     tef = length(dz);
+% endif
+
+% wd = w - w(i_res) - 2*pi*f_meas*(t-t_res);
+% pa = polyfit((t(tppk:tef)-t_res),log(abs((dz(tppk:tef)))./abs(wd(tppk:tef))),1);
+% figure(3);
+% plot((t(tppk:tef)-t_res),log(abs((dz(tppk:tef)))./abs(wd(tppk:tef))));
+% grid on; grid minor;
+
+% % plot((t(ti:tfi)-t_res),log(abs((dz(ti:tfi)))./abs(wd(ti:tfi))));
+% % plot((t-t_res),log(abs((dz))));
+
+% k = pa(1);
+% A = exp(pa(2));
+% Q_meas = 2*pi*f_meas/(-2*k);
+% disp([Q_meas Q]);
+
+te = linspace(-tm/2,tm*1.5,2*length(t));
+
+deswept = conv(z,exp(-0.5i*dw*(te-tm/2).^2),"same");
+% deswept = conv(imag(z),real(exp(-0.5i*dw*(te-tm/2).^2)),"same");
+
+figure(2)
+plot(w/2/pi,abs(deswept))
 grid on; grid minor;
+[~,max_i] = max(deswept);
+f_meas = w(max_i)/2/pi;
+printf("f_meas = %f, f_res = %f,\n error = %f\n",f_meas,w0/2/pi,f_meas-w0/2/pi);
 
-pf = polyfit(w((ti):(tfi))/2/pi-w(1)/2/pi,unwrap(angle((dz((ti):tfi)))),2);
-f_meas = -pf(2)/(2*pf(1))+w(1)/2/pi;
-disp([f_meas, w0/2/pi])
 
-[~,i_res] = min(abs(w-2*pi*f_meas));
-t_res = t(i_res);
-
-tppk = find(abs(dz(ti:end)) < 0.2*max(abs(dz(ti:end))),1) + ti - 1;
-tef = find(abs(dz(ti:end)) < 0.05*max(abs(dz(ti:end))),1) + ti - 1;
-if isempty(tef)
-    tef = length(dz);
-endif
-
-wd = w - w(i_res) - 2*pi*f_meas*(t-t_res);
-pa = polyfit((t(tppk:tef)-t_res),log(abs((dz(tppk:tef)))./abs(wd(tppk:tef))),1);
 figure(3);
-plot((t(tppk:tef)-t_res),log(abs((dz(tppk:tef)))./abs(wd(tppk:tef))));
+plot(t-t(max_i),[abs(z.*exp(-0.5i*dw*(t-t(max_i)).^2))]);
 grid on; grid minor;
-
-% plot((t(ti:tfi)-t_res),log(abs((dz(ti:tfi)))./abs(wd(ti:tfi))));
-% plot((t-t_res),log(abs((dz))./abs(wd)));
-
-k = pa(1);
-A = exp(pa(2));
-Q_meas = 2*pi*f_meas/(-2*k);
-disp([Q_meas Q]);
-
