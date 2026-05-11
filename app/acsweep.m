@@ -1,9 +1,9 @@
 % Configuration variables
-initial_meas_freq_a = 32740000; # mHz
-initial_meas_freq_b = 32740000; 
-final_meas_freq_a = 32820000;
-final_meas_freq_b = 32820000;
-sweep_meas_time = 20;
+initial_meas_freq_a = 32500000; # mHz
+initial_meas_freq_b = 32500000; 
+final_meas_freq_a = 32800000;
+final_meas_freq_b = 32800000;
+sweep_meas_time = 5;
 sweep_pre_time = 2;
 
 sweep_time = sweep_meas_time + sweep_pre_time;
