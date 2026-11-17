@@ -56,120 +56,91 @@ vcal = 301/586; % mV per unit
 
 fs = double(blocks.phase_inc)/2^64*1e6;
 
-figure(1)
-plot(fs - fs(1),blocks.chA'*vcal);
-xlabel "Frequency delta (Hz)"
-ylabel "RMS Voltage (mV)"
-legend("I","Q","DC");
-title "Channel A"
+% ---- deconvolved admittance and BVD fit (poster method) ----
+rate = 1e6/256;            % 1 MSa/s ADC, 256-sample lock-in blocks
+n = length(fs);
+t = (0:n-1)'/rate;
+w = 2*pi*fs(:);
+dw = mean(diff(w))*rate;
+
+z  = -double(blocks.chA(1,:))' + 1i*double(blocks.chA(2,:))';
+zr = -double(blocks.chB(1,:))' + 1i*double(blocks.chB(2,:))';
+
+% chirp compression (swept-sine deconvolution)
+te = linspace(-max(t)/2, max(t)*1.5, 2*n);
+sweep_rate_hz = abs(dw)/2/pi;
+kernel_width = 2e3/max(sweep_rate_hz, eps);
+cb = exp(-0.5i*dw*(te-max(t)/2).^2) .* (abs(te-max(t)/2) < kernel_width);
+dec  = conv(z, cb, 'same') / sum(cb);
+decr = conv(zr, cb, 'same') / sum(cb);
+Y = dec ./ decr;
+[~, i_res] = max(abs(Y));
+
+% BVD fit on the deconvolved admittance (simple charge-amp model)
+Cf = 10e-12;
+f = fs(:);
+y = conj(Y(:));
+f0g = f(i_res);
+amp = abs(y(i_res));
+bw_hz = sum(abs(y) > amp/2) * abs(mean(diff(f)));
+Q0 = max(f0g/max(bw_hz, 1), 10);
+p0 = [f0g, log(Q0), log(2e9), log(1.25e-12), 0];
+
+sm = @(p) ( 1./( 1i*(2*pi*f).*exp(p(3))./(2*pi*p(1)) ...
+                 + 1./(1i*(2*pi*f).*(1./(2*pi*p(1).*exp(p(3))))) ...
+                 + exp(p(3))./exp(p(2)) ) ...
+             + 1i*(2*pi*f).*exp(p(4)) ) ...
+         ./ (-1 ./ (1 ./ (1i*(2*pi*f)*Cf))) .* exp(-1i*p(5));
+fl = max(abs(y))*1e-3;
+obj = @(p) sum(abs((sm(p)-y)./max(abs(y),fl)).^2);
+p = fminsearch(obj, p0, optimset('MaxFunEvals',30000,'MaxIter',30000,'Display','off'));
+
+ym = sm(p);
+SSE = sum(abs(ym-y).^2);
+SST = sum(abs(y-mean(y)).^2);
+R2 = 1 - SSE/SST;
+bvd = [p(1), exp(p(2)), exp(p(3)), exp(p(4)), Cf, p(5)];
+Yfit = conj(ym);
+
+printf('BVD fit: f0 = %.4f kHz, Q = %.4g, Z0 = %.4g MOhm, R = %.4g kOhm, C0 = %.3f pF, Cfb = %.3f pF, phi = %.2f deg, R2 = %.5f\n', ...
+       bvd(1)/1e3, bvd(2), bvd(3)/1e6, bvd(3)/bvd(2)/1e3, ...
+       bvd(4)*1e12, bvd(5)*1e12, bvd(6)*180/pi, R2);
+
+% graphs: demodulated response and deconvolved admittance
+adm_scale = 2*pi*32e3*Cf*1e6;   % same uS scale as the poster
+A_uS  = abs(Y)*adm_scale;
+Af_uS = abs(Yfit)*adm_scale;
+ph  = -angle(1i*Y)*180/pi;
+phf = -angle(1i*Yfit)*180/pi;
+f_khz = f/1e3;
+
+figure(1);
+set(gcf, 'Position', [100 100 1200 480]);
+
+subplot(1,2,1);
+plot(t, double(blocks.chA(2,:))'*vcal, 'r', ...
+     t, double(blocks.chA(1,:))'*vcal, 'b');
+xlabel 't (s)'
+ylabel 'lock-in voltage (mV_{rms})'
+legend('I/Re', 'Q/Im')
+title 'Demodulated chirp response'
 grid on; grid minor;
 
-figure(2)
-plot(fs - fs(1),blocks.chB'*vcal);
-xlabel "Frequency delta (Hz)"
-ylabel "RMS Voltage (mV)"
-legend("I","Q","DC");
-title "Channel B"
-grid on; grid minor;
-
-figure(3)
-
-% pkg load signal
-
-QI = blocks.chA(1,:);
-QQ = blocks.chA(2,:);
-VI = blocks.chB(1,:);
-VQ = blocks.chB(2,:);
-% fsd = fs(1:25:end);
-fsd = fs;
-Q = movmean(QI+1i*QQ,200);
-V = movmean(VI+1i*VQ,200);
-C = 10.5e-12;
-R = 2e9;
-ZC = 1./(1i*2*pi*fsd*C);
-ZRC = 1./(1./R+1./ZC);
-ZDUT = -(V./Q).*ZRC;
-h=plotyy(fsd - fsd(1),abs(ZDUT),fsd - fsd(1),-180-unwrap(angle(ZDUT))*180/pi,@semilogy,@plot);
-axis(h(1),[0,max(fsd-fsd(1)),7e3,5e9]);
-title "Impedance"
-xlabel "Frequency delta (Hz)"
-ylabel(h(1),'|Z|')
-ylabel(h(2),'Phase (°)')
-grid on; grid minor;
-
-% pkg load optim
-
-% function Z = bvd_impedance(p, f)
-%   % p = [Rm, Lm, Cm, C0]
-%   Rm = p(1)*1e3;
-%   Lm = p(2)*1e3;
-%   Cm = p(3)*1e-15;
-%   C0 = p(4)*1e-12;
-%   Cm = max(p(3)*1e-15, 1e-18);
-
-%   w = 2*pi*f;
-
-%   Zm = Rm + 1i*w.*Lm + 1./(1i*w.*Cm);
-%   Y  = 1./Zm + 1i*w.*C0;
-%   Z  = 1./Y;
-% endfunction
-
-% function y = bvd_model_ri(p, f)
-%   Z = bvd_impedance(p, f);
-%   mag = abs(Z);
-%   mag = max(mag, 1e-12);   % floor to avoid log(0)
-%   y = [log(abs(Z)),angle(Z)];
-% endfunction
-
-% y_meas = [log(abs(ZDUT)),unwrap(-angle(ZDUT))-pi];
-
-% % ---------------- INITIAL GUESS ----------------
-
-% fs_guess = fsd(find(abs(ZDUT) == min(abs(ZDUT)), 1));
-% w0 = 2*pi*fs_guess;
-
-% Rm0 = min(abs(ZDUT))/1e3-2;
-% Cm0 = 3;
-% Lm0 = 1/(w0^2 * Cm0*1e-15)/1e3;
-% C00 = 1.75;
-
-% p0 = [Rm0; Lm0; Cm0; C00]';   % column vector
-
-% % ---------------- BOUNDS ----------------
-% % lb = [1,    4,   1,  1];
-% % ub = [100,  10,   6,  3];
-
-% lb = p0 + [-0.5, -0.001, -0.001, -0.2];
-% ub = lb + [1, 0.002, 0.002, 0.3];
-
-% % ---------------- FIT ----------------
-
-% options = optimset(
-%   "TolX", 1e-12,
-%   "TolFun", 1e-12,
-%   "MaxIter", 2000,
-%   "MaxFunEvals", 5000
-% );
-
-% [p_fit, resnorm, resid, exitflag, output] = ...
-%   lsqcurvefit(
-%     @(p,f) bvd_model_ri(p,f),
-%     p0,
-%     fsd,
-%     y_meas,
-%     lb,
-%     ub,
-%     options
-%   );
-
-% % ---------------- RESULTS ----------------
-% Rm = p_fit(1);
-% Lm = p_fit(2);
-% Cm = p_fit(3);
-% C0 = p_fit(4);
-
-% printf("BVD fit results:\n");
-% printf("Rm = %.6g ohm\n", Rm);
-% printf("Lm = %.6g H\n",   Lm);
-% printf("Cm = %.6g F\n",   Cm);
-% printf("C0 = %.6g F\n",   C0);
+subplot(1,2,2);
+[ax, h1, h2] = plotyy(f_khz, A_uS, f_khz, ph);
+set(h1, 'LineStyle', 'none', 'Marker', '.', 'MarkerSize', 2);
+set(h2, 'LineStyle', 'none', 'Marker', '.', 'MarkerSize', 2);
+set(ax(1), 'YScale', 'log');
+hold(ax(1), 'on');
+plot(ax(1), f_khz, Af_uS, 'k--', 'LineWidth', 1.4);
+hold(ax(1), 'off');
+hold(ax(2), 'on');
+plot(ax(2), f_khz, phf, 'k--', 'LineWidth', 1.0);
+hold(ax(2), 'off');
+set(ax(2), 'YLim', [-180 180], 'YTick', -180:90:180);
+ylabel(ax(1), '|Y| (\muS)')
+ylabel(ax(2), 'phase (deg)')
+xlabel(ax(1), 'f (kHz)')
+title(ax(1), 'Deconvolved admittance')
+legend(ax(1), 'measured', 'BVD fit')
+grid(ax(1), 'on'); grid(ax(2), 'on');
